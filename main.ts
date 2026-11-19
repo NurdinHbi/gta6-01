@@ -73,4 +73,7 @@ const indexSize = statSync(join(out, 'game', 'index.html')).size;
 if (indexSize > 1048576) {
   throw new Error(`game/index.html is ${indexSize} bytes, over the 1 MiB cap`);
 }
+if (written.length > 1572864) {
+  throw new Error(`dossier.json is ${written.length} bytes, over the 1.5 MiB cap`);
+}
 console.log(`dossier written: ${shots.length} screenshots, game/index.html ${indexSize} bytes, dossier ${written.length} bytes`);

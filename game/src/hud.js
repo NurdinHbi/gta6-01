@@ -1,7 +1,7 @@
 // HUD: the DOM overlay (stars, health, cash, clock, speed, objective,
 // messages, screens) and the 2D canvas minimap. The HUD reads the game
 // state every frame and never owns any simulation.
-import { CITY_HALF, OCEAN_X, MISSIONS } from './config.js';
+import { CITY_HALF, OCEAN_X } from './config.js';
 import { missionObjective } from './missions.js';
 
 export function createHud() {

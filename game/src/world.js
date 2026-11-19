@@ -93,6 +93,11 @@ export function buildCity(seed) {
   };
 }
 
+// Is (x, z) inside the city blocks (not beach or ocean)?
+export function isInCity(x, z) {
+  return Math.abs(x) <= CITY_HALF + 2 && Math.abs(z) <= CITY_HALF + 2;
+}
+
 // Is (x, z) on a road surface (including intersections)?
 export function isOnRoad(x, z) {
   for (const c of ROADS) {

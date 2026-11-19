@@ -32,12 +32,14 @@ export function spawnPeds(city, rng) {
   return peds;
 }
 
-export function scarePeds(peds, x, z, radius) {
+// Flee from a scare at (x, z). `rng` is optional; when given, the flee
+// duration comes from the seeded RNG so staged scenes stay deterministic.
+export function scarePeds(peds, x, z, radius, rng) {
   for (const ped of peds) {
     if (ped.state === 'down') continue;
     if (dist(ped.x, ped.z, x, z) < radius) {
       ped.state = 'flee';
-      ped.stateTimer = 2.5 + Math.random() * 2;
+      ped.stateTimer = rng ? rng.range(2.5, 4.5) : 2.5 + Math.random() * 2;
       ped.fleeX = x;
       ped.fleeZ = z;
       ped.scared = 1;

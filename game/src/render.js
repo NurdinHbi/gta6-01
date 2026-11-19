@@ -3,7 +3,7 @@
 // peds, cops, beacon, cash). Geometries and materials are shared so the
 // draw call count stays low; the camera is a smooth third-person orbit.
 import * as THREE from 'three';
-import { CITY_HALF, OCEAN_X, BEACH_X, COLORS, ROADS, ROAD, GRID } from './config.js';
+import { CITY_HALF, OCEAN_X, COLORS, ROADS, ROAD } from './config.js';
 import { lerp, angleDiff, clamp } from './random.js';
 
 export function createRenderer(canvas) {
@@ -23,7 +23,7 @@ export function createRenderer(canvas) {
   const sun = new THREE.DirectionalLight(COLORS.sun, 2.2);
   sun.position.set(220, 320, 140);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(1024, 1024);
   sun.shadow.camera.left = -380;
   sun.shadow.camera.right = 380;
   sun.shadow.camera.top = 380;

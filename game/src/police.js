@@ -3,7 +3,7 @@
 // Quiet for 20 seconds with no cop close by and the heat decays. A cop
 // who holds the player on foot for 2 seconds busts them.
 import { WANTED, POLICE, CITY_HALF } from './config.js';
-import { clamp, dist } from './random.js';
+import { clamp, dist, angleDiff } from './random.js';
 import { makeCar } from './vehicles.js';
 import { roadPointAwayFrom } from './world.js';
 
@@ -114,8 +114,7 @@ export function updatePoliceCars(wanted, dt, player, cars, city) {
     if (car.dead) continue;
     const d = dist(car.x, car.z, px, pz);
     const wantAngle = Math.atan2(pz - car.z, px - car.x);
-    const diff = ((wantAngle - car.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-    car.angle += clamp(diff, -1.8 * dt, 1.8 * dt);
+    car.angle += clamp(angleDiff(wantAngle, car.angle), -1.8 * dt, 1.8 * dt);
     const target = d > 6 ? POLICE.carChaseSpeed : POLICE.carChaseSpeed * 0.5;
     car.speed += clamp(target - car.speed, -20 * dt, 10 * dt);
     car.x += Math.cos(car.angle) * car.speed * dt;
@@ -128,11 +127,11 @@ export function updatePoliceCars(wanted, dt, player, cars, city) {
         player.car.speed = Math.max(player.car.speed * 0.5, 6);
         player.car.x += Math.cos(car.angle) * 1.2;
         player.car.z += Math.sin(car.angle) * 1.2;
-        if (car.ramTimer === undefined || car.ramTimer <= 0) {
+        if (car.ramTimer <= 0) {
           damage += POLICE.ramDamage;
           car.ramTimer = 1.2;
         }
-      } else if (car.ramTimer === undefined || car.ramTimer <= 0) {
+      } else if (car.ramTimer <= 0) {
         damage += POLICE.ramDamage;
         player.health -= POLICE.ramDamage;
         player.lastDamageAt = player.time;
@@ -140,7 +139,7 @@ export function updatePoliceCars(wanted, dt, player, cars, city) {
         car.ramTimer = 1.2;
       }
     }
-    if (car.ramTimer !== undefined) car.ramTimer -= dt;
+    car.ramTimer -= dt;
   }
   return damage;
 }

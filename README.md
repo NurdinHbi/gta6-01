@@ -107,4 +107,5 @@ vendor/
 
 Staged deterministically with `?shot=start|drive|chase|mission&seed=1`
 (see `game/src/shots.js`): the title vista, driving downtown, a 3-star
-police chase, and a mission in progress at Mara's garage.
+police chase with the patrol cars staged in frame ahead of the player, and
+a mission in progress at Mara's garage.

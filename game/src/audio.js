@@ -7,6 +7,7 @@ export function createAudio() {
     master: null,
     muted: false,
     engineOsc: null,
+    engineOsc2: null,
     engineGain: null,
     sirenOsc: null,
     sirenGain: null,
@@ -29,21 +30,20 @@ export function createAudio() {
       audio.engineOsc = audio.ctx.createOscillator();
       audio.engineOsc.type = 'sawtooth';
       audio.engineOsc.frequency.value = 55;
-      const engineOsc2 = audio.ctx.createOscillator();
-      engineOsc2.type = 'sawtooth';
-      engineOsc2.frequency.value = 58;
+      audio.engineOsc2 = audio.ctx.createOscillator();
+      audio.engineOsc2.type = 'sawtooth';
+      audio.engineOsc2.frequency.value = 58;
       audio.engineGain = audio.ctx.createGain();
       audio.engineGain.gain.value = 0;
       const filter = audio.ctx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.frequency.value = 420;
       audio.engineOsc.connect(filter);
-      engineOsc2.connect(filter);
+      audio.engineOsc2.connect(filter);
       filter.connect(audio.engineGain);
       audio.engineGain.connect(audio.master);
       audio.engineOsc.start();
-      engineOsc2.start();
-      audio.engineOsc2 = engineOsc2;
+      audio.engineOsc2.start();
       // Police siren: a sine that wails between two notes.
       audio.sirenOsc = audio.ctx.createOscillator();
       audio.sirenOsc.type = 'sine';

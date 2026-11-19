@@ -44,6 +44,8 @@ export function createInput(canvas) {
     if (event.code === 'KeyM') input.mute = true;
     if (event.code === 'Escape' || event.code === 'KeyP') input.pause = true;
     if (event.code === 'Space') event.preventDefault();
+    // Arrow keys scroll the page in some browsers; the game owns them.
+    if (event.code.startsWith('Arrow')) event.preventDefault();
     refreshHeld();
   });
   window.addEventListener('keyup', (event) => {

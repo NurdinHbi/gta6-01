@@ -2,6 +2,10 @@
 // game balances against lives here, so a tweak never means hunting code.
 export const STEP = 1 / 60;
 export const SAVE_KEY = 'solmar-city-save-v1';
+export const SAVE_VERSION = 1; // bump when the save shape changes
+
+// Camera orbit limits (shared by the orbit controls and the shot staging).
+export const CAMERA = { minDist: 6, maxDist: 16, minPitch: 0.08, maxPitch: 1.1 };
 
 // City grid: 10 x 10 blocks, roads between them, beach + ocean on the east edge.
 export const BLOCK = 40;

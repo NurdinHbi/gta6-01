@@ -55,3 +55,15 @@ export function dist2(ax, az, bx, bz) {
 export function dist(ax, az, bx, bz) {
   return Math.sqrt(dist2(ax, az, bx, bz));
 }
+
+// Fisher-Yates shuffle driven by a seeded rng (returns a new array).
+export function shuffled(rng, list) {
+  const out = list.slice();
+  for (let i = out.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rng.next() * (i + 1));
+    const tmp = out[i];
+    out[i] = out[j];
+    out[j] = tmp;
+  }
+  return out;
+}

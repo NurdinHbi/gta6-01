@@ -1,8 +1,8 @@
 // The player on foot: third-person movement relative to the camera,
 // punching, pistol shooting, entering and exiting cars, health and regen.
-import { PLAYER, CAR } from './config.js';
-import { clamp, dist } from './random.js';
-import { resolveBuildingCollision, nearestRoadPoint } from './world.js';
+import { PLAYER } from './config.js';
+import { clamp, dist, angleDiff } from './random.js';
+import { resolveBuildingCollision } from './world.js';
 import { nearestCar } from './vehicles.js';
 import { scarePeds } from './pedestrians.js';
 
@@ -61,7 +61,7 @@ export function updatePlayerOnFoot(player, input, cameraYaw, dt, city, cars, ped
 }
 
 // Punch: hits the nearest ped or cop in range, in front of the player.
-export function tryPunch(player, peds, cops) {
+export function tryPunch(player, peds, cops, rng) {
   if (player.punchTimer > 0) return null;
   player.punchTimer = PLAYER.punchCooldown;
   let best = null;
@@ -72,7 +72,7 @@ export function tryPunch(player, peds, cops) {
       const d = dist(player.x, player.z, e.x, e.z);
       if (d < bestD) {
         const ang = Math.atan2(e.z - player.z, e.x - player.x);
-        if (Math.abs(((ang - player.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 1.2) {
+        if (Math.abs(angleDiff(ang, player.angle)) < 1.2) {
           best = { target: e, kind };
           bestD = d;
         }
@@ -85,7 +85,7 @@ export function tryPunch(player, peds, cops) {
   if (best.kind === 'ped') {
     best.target.state = 'down';
     best.target.stateTimer = 4;
-    scarePeds(peds, player.x, player.z, 8);
+    scarePeds(peds, player.x, player.z, 8, rng);
   } else {
     best.target.x += Math.cos(player.angle) * 1.5;
     best.target.z += Math.sin(player.angle) * 1.5;

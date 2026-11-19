@@ -2,7 +2,7 @@
 // Each mission has stages with a target point, an objective line, an
 // optional timer, and a cash reward. The game object carries `mission`
 // and this module advances it; the HUD and minimap read the same state.
-import { MISSIONS, GARAGE, SAFEHOUSE, BANK, DOCKS, CITY_HALF } from './config.js';
+import { MISSIONS, GARAGE, SAFEHOUSE, BANK, DOCKS } from './config.js';
 import { dist } from './random.js';
 import { randomRoadPoint } from './world.js';
 
@@ -150,7 +150,7 @@ export function updateMissions(game, dt) {
         missions.stage = 2;
         missions.cashStash = null;
         setTarget(missions, DOCKS.x, DOCKS.z, 'The Docks');
-        game.addWanted(4 - game.wanted.stars > 0 ? 4 - game.wanted.stars : 0);
+        game.addWanted(Math.max(0, 4 - game.wanted.stars));
         missions.message = 'ALARM! Four stars — run for the docks!';
         missions.messageTimer = 5;
         game.audio.sirenBlip();

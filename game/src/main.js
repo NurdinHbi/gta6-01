@@ -2,13 +2,13 @@
 // wires input, audio, HUD and renderer together, runs the simulation at
 // a fixed 1/60 s step, and owns save/load and the ?shot= staging used
 // for screenshots.
-import { STEP, SAVE_KEY, START_CASH, STATION, HOSPITAL, CAR, POLICE } from './config.js';
-import { makeRng, clamp, dist } from './random.js';
+import { STEP, SAVE_KEY, START_CASH, STATION, HOSPITAL } from './config.js';
+import { makeRng, clamp } from './random.js';
 import { buildCity } from './world.js';
 import { createInput } from './input.js';
 import { createAudio } from './audio.js';
 import { createPlayer, updatePlayerOnFoot, tryPunch, tryShoot, tryEnterCar, exitCar, regenHealth } from './player.js';
-import { spawnTraffic, drivePlayerCar, updateTraffic, separateCars, speedKmh, nearestCar } from './vehicles.js';
+import { spawnTraffic, drivePlayerCar, updateTraffic, separateCars, speedKmh } from './vehicles.js';
 import { spawnPeds, updatePeds, carHitsPed, scarePeds } from './pedestrians.js';
 import { createWanted, addWanted, updateWanted, updateCops, updatePoliceCars } from './police.js';
 import { createMissions, updateMissions, beginStory, startMissionAt } from './missions.js';
@@ -206,11 +206,11 @@ game.step = (dt, silent) => {
 
   // Combat on foot.
   if (!p.inCar && input.punch) {
-    const result = tryPunch(p, game.peds, game.wanted.cops);
+    const result = tryPunch(p, game.peds, game.wanted.cops, game.rng);
     if (result && result.hit) {
       if (!silent) audio.punch();
       if (result.kind === 'cop') commitCrime(2);
-      scarePeds(game.peds, p.x, p.z, 10);
+      scarePeds(game.peds, p.x, p.z, 10, game.rng);
     }
   }
   if (!p.inCar && input.shoot) {
@@ -218,7 +218,7 @@ game.step = (dt, silent) => {
     if (result) {
       if (!silent) audio.gunshot();
       fireTracer(meshes, p.x, p.z, result.endX, result.endZ);
-      scarePeds(game.peds, p.x, p.z, 22);
+      scarePeds(game.peds, p.x, p.z, 22, game.rng);
       commitCrime(1);
       if (result.hit && result.kind === 'cop' && result.target.down) commitCrime(2);
     }
@@ -249,7 +249,7 @@ game.step = (dt, silent) => {
     commitCrime(1);
     game.stats.pedsHit += 1;
     if (!silent) audio.crash();
-    scarePeds(game.peds, hit.ped.x, hit.ped.z, 18);
+    scarePeds(game.peds, hit.ped.x, hit.ped.z, 18, game.rng);
   }
   updateWanted(game.wanted, dt, game.time, p.inCar ? p.car.x : p.x, p.inCar ? p.car.z : p.z, game.rng, game.cars, game.city);
   const busted = updateCops(game.wanted, dt, p, game.cars);
@@ -352,17 +352,17 @@ function frame(now) {
   if (game.screen === 'play') {
     acc += dtReal;
     let steps = 0;
-    while (acc >= STEP && steps < 5) {
+    while (acc >= STEP && steps < 8) {
       game.step(STEP, false);
       acc -= STEP;
       steps += 1;
     }
-    if (steps === 5) acc = 0;
+    if (steps === 8) acc = 0;
   } else if (game.screen === 'title') {
     // The city stays alive behind the title screen.
     acc += dtReal;
     let steps = 0;
-    while (acc >= STEP && steps < 5) {
+    while (acc >= STEP && steps < 8) {
       const keep = game.screen;
       game.screen = 'play';
       game.step(STEP, true);
@@ -370,7 +370,7 @@ function frame(now) {
       acc -= STEP;
       steps += 1;
     }
-    if (steps === 5) acc = 0;
+    if (steps === 8) acc = 0;
   }
 
   if (game.screen === 'title') updateTitleCamera(render, game, dtReal);

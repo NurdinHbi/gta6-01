@@ -3,8 +3,9 @@
 // drift, building and car collision, and a traffic loop that follows the
 // road grid and turns at intersections.
 import { CAR, ROAD, ROADS, CITY_HALF } from './config.js';
-import { clamp, angleDiff, dist } from './random.js';
+import { clamp, dist } from './random.js';
 import { buildingHit, nearestRoadPoint, randomRoadPoint } from './world.js';
+import { CAR_COLORS } from './world.js';
 
 let nextCarId = 1;
 
@@ -20,6 +21,8 @@ export function makeCar(kind, x, z, angle, color) {
     honk: 0,
     dead: false,
     brakeLight: false,
+    crashed: false,
+    ramTimer: 0,
   };
 }
 nextCarId = 1;
@@ -36,7 +39,7 @@ export function spawnTraffic(city, rng, playerX, playerZ) {
     const axis = rng.chance(0.5) ? 'x' : 'z';
     const dir = rng.chance(0.5) ? 1 : -1;
     const lane = (ROAD / 2 - 1.6) * (rng.chance(0.5) ? 1 : -1);
-    const car = makeCar('traffic', p.x, p.z, axis === 'x' ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2), rng.pick([0xc23a2e, 0x2e5fa3, 0xe8e8e8, 0x2a9d8f, 0x7b5ea7, 0x4d7c4d, 0xd97b29, 0xf2c200]));
+    const car = makeCar('traffic', p.x, p.z, axis === 'x' ? (dir > 0 ? 0 : Math.PI) : (dir > 0 ? Math.PI / 2 : -Math.PI / 2), rng.pick(CAR_COLORS));
     car.axis = axis;
     car.dir = dir;
     car.lane = lane;
@@ -49,7 +52,7 @@ export function spawnTraffic(city, rng, playerX, playerZ) {
     const axis = rng.chance(0.5) ? 'x' : 'z';
     const lane = (ROAD / 2 - 1.2) * (rng.chance(0.5) ? 1 : -1);
     const angle = axis === 'x' ? (rng.chance(0.5) ? 0 : Math.PI) : (rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2);
-    const car = makeCar('parked', axis === 'x' ? p.x : p.x + lane, axis === 'x' ? p.z + lane : p.z, angle, rng.pick([0xc23a2e, 0x2e5fa3, 0xe8e8e8, 0x2a9d8f, 0x7b5ea7, 0x4d7c4d, 0xd97b29]));
+    const car = makeCar('parked', axis === 'x' ? p.x : p.x + lane, axis === 'x' ? p.z + lane : p.z, angle, rng.pick(CAR_COLORS));
     car.axis = axis;
     cars.push(car);
   }
@@ -58,8 +61,7 @@ export function spawnTraffic(city, rng, playerX, playerZ) {
 
 // Player driving: W/S throttle, A/D steer, Space handbrake.
 export function drivePlayerCar(car, input, dt, city, allCars) {
-  const forward = Math.cos(car.angle);
-  const right = Math.sin(car.angle);
+  car.crashed = false;
   let throttle = 0;
   if (input.forward) throttle = 1;
   if (input.back) throttle = car.speed > 0.5 ? -1 : -0.6; // brake, then reverse
@@ -87,7 +89,7 @@ export function drivePlayerCar(car, input, dt, city, allCars) {
   car.x = clamp(car.x, -CITY_HALF - 2, 330);
   car.z = clamp(car.z, -CITY_HALF - 2, CITY_HALF + 2);
   car.brakeLight = input.back || input.handbrake;
-  return car.crashed === true;
+  return car.crashed;
 }
 
 // Traffic AI: cruise along its road; at an intersection, sometimes turn.

@@ -43,6 +43,36 @@ function putPlayerInCar(game, x, z, angle, color) {
   return car;
 }
 
+// Chase framing fix (v1 had the patrol cars behind the camera): after the
+// autopilot run, move each police car to a spot ahead of the player's car
+// — one in the lane ahead, one alongside — so the chase camera, which sits
+// behind the player, actually sees them. Their speed matches the player's
+// so the next live frames keep them in view.
+function framePoliceCarsInView(game) {
+  const car = game.player.car;
+  if (!car) return;
+  const fx = Math.cos(car.angle);
+  const fz = Math.sin(car.angle);
+  const lx = -fz;
+  const lz = fx;
+  const spots = [
+    { ahead: 20, side: -4 },
+    { ahead: 14, side: 5 },
+  ];
+  game.wanted.policeCars.forEach((copCar, i) => {
+    const spot = spots[i % spots.length];
+    copCar.x = car.x + fx * spot.ahead + lx * spot.side;
+    copCar.z = car.z + fz * spot.ahead + lz * spot.side;
+    copCar.angle = car.angle;
+    copCar.speed = Math.max(car.speed, 16);
+    copCar.ramTimer = 0;
+  });
+  // Keep the chase camera aimed down the road, not drifting.
+  game.camera.yaw = car.angle + Math.PI;
+  game.camera.pitch = 0.3;
+  game.camera.dist = 12;
+}
+
 // Stage the named scene on the live game object. Returns the screen the
 // HUD should show over it.
 export function stageShot(name, game) {
@@ -74,6 +104,7 @@ export function stageShot(name, game) {
       game.step(STEP, true);
     }
     game.addWanted(0); // keep the 3 stars the chase earned; no decay yet
+    framePoliceCarsInView(game);
     return 'play';
   }
   if (name === 'mission') {
