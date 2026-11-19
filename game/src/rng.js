@@ -1,10 +1,10 @@
-// Seeded randomness for Solmar City: one mulberry32 stream plus small helpers so the
-// city, traffic and pedestrians are identical for a given ?seed= value (screenshots stay
-// repeatable) while a missing seed still plays a fresh city every visit.
+// A small seeded random source so a ?seed= run (and every staged screenshot) is
+// repeatable, while a normal visit still feels different each time.
 
 export function mulberry32(seed) {
-  let a = seed | 0;
+  let a = seed >>> 0;
   return function next() {
+    a |= 0;
     a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
@@ -12,35 +12,20 @@ export function mulberry32(seed) {
   };
 }
 
-export function makeRng(seed) {
-  const next = mulberry32(seed);
-  return {
-    next,
-    /** Float in [min, max). */
-    range(min, max) {
-      return min + next() * (max - min);
-    },
-    /** Integer in [min, max] inclusive. */
-    int(min, max) {
-      return Math.floor(min + next() * (max - min + 1));
-    },
-    /** One element of an array. */
-    pick(list) {
-      return list[Math.floor(next() * list.length)];
-    },
-    /** True with probability p. */
-    chance(p) {
-      return next() < p;
-    },
-  };
-}
-
-/** Turn an arbitrary seed string into a stable 32-bit integer. */
-export function hashSeed(text) {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
+export class Rng {
+  constructor(seed) {
+    this.next = mulberry32(seed);
   }
-  return h >>> 0;
+  float(min = 0, max = 1) {
+    return min + (max - min) * this.next();
+  }
+  int(min, max) {
+    return Math.floor(this.float(min, max + 1));
+  }
+  pick(list) {
+    return list[Math.floor(this.next() * list.length)];
+  }
+  chance(p) {
+    return this.next() < p;
+  }
 }

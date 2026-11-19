@@ -1,93 +1,70 @@
-# Solmar City
+# Solmar City — an open-world crime game
 
-An original 3D open-world crime game for the make.fun **gta6-01** bounty — "Make GTA 6".
-A sun-soaked procedural coastal city you can explore on foot and by car, steal cars in,
-outrun the police through, and take story jobs in. Everything is original: the city,
-the characters, the story, the art and the sound. No Rockstar Games names, logos,
-characters, maps or assets.
+A complete, original 3D open-world crime game for the make.fun **gta6-01**
+bounty ("Make GTA 6"). It plays offline in a desktop browser from static files,
+with no network requests: three.js r152 is vendored under `game/vendor/`.
 
-## Play
+## The game
 
-Serve `game/` and open it in a desktop browser:
+You are new in **Solmar City** — a sun-soaked procedural coastal city of ~150
+buildings on a 10×10 street grid, with a sand beach, a pier, palms and
+streetlights. A fixer named **Mara** pays cash for drivers with nerve.
+
+- **On foot:** WASD to move, Shift to run, Space to jump, F to punch, `2` +
+  click to shoot the pistol, drag the mouse to look around.
+- **Driving:** press E near any car to steal it (that is 1 star), W/S to drive,
+  A/D to steer, Space for the handbrake, E to get out.
+- **Traffic & pedestrians:** 10 AI traffic cars circulate the blocks, 12 parked
+  cars wait to be stolen, 24 pedestrians stroll the sidewalks and flee gunfire.
+- **Wanted 0–5 stars:** stealing, hitting pedestrians, shooting and killing cops
+  raise the heat. Foot cops chase from 1 star, police cars from 2. Get caught
+  and you are Busted; run out of health and you are Wasted — either way you wake
+  up at the plaza 10% lighter. Stay clean and out of sight and the stars fade.
+- **Story — four missions from Mara:** First Wheels ($300), Pizza Rush ($500),
+  Lose the Heat ($800), The Solmar Job ($1,500). Each has a glowing beacon, a
+  minimap marker, an objective panel and a timer. After the story, taxi fares
+  pay $40–$120 a ride in free roam.
+- **HUD:** live 2D minimap (player, cars, cops, objective), health, cash,
+  wanted stars, clock, speed and objective panel.
+- **Save:** progress (cash, story, health, position, clock) autosaves to
+  localStorage; Continue picks up where you left off.
+- **Sound:** fully synthesized WebAudio — engine drone, gunshots, sirens,
+  pickups, mission jingles and an ambient pad. No audio files. M mutes.
+
+## Play it
 
 ```sh
 node serve.ts
-# → http://localhost:8080
+# open http://localhost:8080
 ```
 
-No build step, no network requests at runtime — the game is static files, and
-three.js r170 is vendored under `game/vendor/three.min.js`.
+## Hand it in
 
-## Controls
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+```
 
-| Input | Action |
-| --- | --- |
-| WASD | Walk / drive (W accelerate, S brake/reverse) |
-| Shift | Run |
-| Mouse drag | Orbit the camera, wheel zooms |
-| E | Enter / steal a car, get out, talk to Mara |
-| F | Punch |
-| Click | Fire the pistol |
-| Space | Handbrake while driving |
-| P | Pause, H help, M mute |
-
-## The city
-
-A 10×10-block procedural grid (~150 buildings with canvas-textured facades), ringed
-by streets with traffic, sidewalks full of pedestrians, palms, streetlights, a sand
-beach and a wooden pier over the sea. The layout is seeded — `?seed=N` replays the
-same city — and the game runs on a fixed 1/60 s simulation.
-
-## Systems
-
-- **On foot and by car** — third-person orbit camera on foot, chase camera in the car,
-  arcade handling with steering, handbrake and building/traffic collisions.
-- **Stealing** — 12 parked cars plus the traffic itself. Taking one puts heat on you.
-- **Wanted 0–5 stars** — rises when you steal, hit a pedestrian, shoot, or drop a cop.
-  Foot cops chase from 1 star, patrol cars with flashing light bars join from 2. Lay low
-  and the heat cools off.
-- **Busted / Wasted** — arrested by a cop holding you, or flatlined, and you wake up at
-  the police station or the hospital minus 10% of your cash.
-- **Missions** — four sequential jobs for the fixer Mara, each with a gold beacon, a
-  minimap marker and a timer: First Wheels ($300), Pizza Rush ($500), Lose the Heat
-  ($800), The Solmar Job ($1,500). Finish all four and the city is yours in free roam.
-- **HUD** — live 2D minimap (player, traffic, police, peds, mission marker), wanted
-  stars, health, cash, in-game clock, speedometer and objective panel.
-- **Save** — progress autosaves to localStorage; Continue from the title screen.
-- **Sound** — fully synthesized WebAudio: engine hum, two-tone sirens, gunshots,
-  punches, crashes, jingles and a quiet bassline. No audio files.
-
-## Shots
-
-`shots.json` stages four scenes for screenshots (`?shot=start|play|end&seed=N` sets
-`window.__shotReady` once painted): the title over the city, a drive with a job
-beacon, a three-star police chase, and a second drive at another seed.
+`main.ts` (Node 22, stdlib only) copies `game/` and `screenshots/` to the output
+directory and writes `dossier.json` with the kit's `vendor/makefun-game.ts`.
 
 ## Layout
 
-```
-main.ts            entry point: copies game/ + screenshots/ to /output, writes dossier.json
-serve.ts           static server for local play
-game/
-  index.html       page, HUD DOM, import map for three
-  vendor/
-    three.min.js   three.js r170 (vendored)
-  src/
-    boot.js        entry, main loop, screens, combat, wanted, camera
-    city.js        procedural city, beach, pier, colliders, minimap data
-    rng.js         seeded random
-    state.js       game state + localStorage save
-    controls.js    keyboard / mouse input
-    sound.js       synthesized WebAudio
-    people.js      pedestrians + foot cops
-    traffic.js     AI traffic, parked cars, police patrols, car builder
-    driving.js     player car physics, enter/exit, muzzle tracer
-    story.js       Mara's four missions + gold beacon
-    overlay.js     HUD, minimap, screens
-    staging.js     ?shot= scenes
-screenshots/      4 real in-browser captures of the game
-```
+- `game/index.html` — page, HUD and screens
+- `game/src/main.js` — boot, loop, player, combat, driving, Busted/Wasted
+- `game/src/city.js` — procedural city, beach, pier, collision
+- `game/src/vehicles.js` — car meshes, arcade physics, traffic AI, police chase
+- `game/src/people.js` — pedestrians and foot cops
+- `game/src/missions.js` — Mara's four story missions and taxi fares
+- `game/src/wanted.js` — wanted level, police dispatch, heat decay
+- `game/src/hud.js` — HUD and live minimap
+- `game/src/audio.js` — synthesized WebAudio sound
+- `game/src/controls.js` — keyboard and mouse orbit camera
+- `game/src/save.js` — localStorage save / Continue
+- `game/src/shots.js` — staged screenshot scenes (`?shot=chase|drive|mission|foot`)
+- `game/src/config.js`, `game/src/rng.js` — tuning and seeded randomness
+- `game/vendor/three.min.js` — three.js r152 (MIT), vendored
 
 ## License
 
-MIT — see `LICENSE`.
+MIT. Everything in Solmar City — the city, characters, vehicles, names, story,
+art, sound and music — is original. Nothing is taken from any commercial game.

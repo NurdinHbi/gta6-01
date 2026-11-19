@@ -1,114 +1,89 @@
-// Keyboard and mouse for Solmar City. Held keys are read every frame; one-shot actions
-// (enter a car, punch, pause, help, mute) are queued as flags and taken once, so a press
-// landing between two frames is never lost and never fires twice. The camera orbits by
-// dragging with the mouse, and the wheel zooms — no pointer lock, so it works the same
-// in a real browser and in a headless playtest.
+// Keyboard and mouse: WASD, run, punch, pistol, car keys, pause, mute, and an
+// orbit camera driven by dragging (or pointer lock after a click). The game
+// reads a snapshot each frame; edges (just-pressed keys) are consumed once.
 
-export const ACT_ENTER = 1;
-export const ACT_PUNCH = 2;
-export const ACT_PAUSE = 4;
-export const ACT_HELP = 8;
-export const ACT_MUTE = 16;
-export const ACT_SHOOT = 32;
+export class Controls {
+  constructor(canvas) {
+    this.keys = new Set();
+    this.pressed = new Set();   // keys pressed since the last takePress()
+    this.camYaw = Math.PI;      // camera looks north by default
+    this.camPitch = 0.42;
+    this.dragging = false;
+    this.lastX = 0;
+    this.lastY = 0;
+    this.mouseClicked = false;
+    this.locked = false;
 
-const FORWARD = new Set(['KeyW', 'ArrowUp']);
-const BACK = new Set(['KeyS', 'ArrowDown']);
-const LEFT = new Set(['KeyA', 'ArrowLeft']);
-const RIGHT = new Set(['KeyD', 'ArrowRight']);
-const RUN = new Set(['ShiftLeft', 'ShiftRight']);
-const BRAKE = new Set(['Space']);
-
-export function createControls(canvas) {
-  const held = new Set();
-  let actions = 0;
-  let lookDX = 0;
-  let lookDY = 0;
-  let zoomDelta = 0;
-  let dragging = false;
-  let lastX = 0;
-  let lastY = 0;
-
-  window.addEventListener('keydown', (event) => {
-    if (event.repeat) {
-      if (FORWARD.has(event.code) || BACK.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code)) {
-        event.preventDefault();
+    window.addEventListener('keydown', (e) => {
+      if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+      if (!e.repeat) {
+        this.keys.add(e.code);
+        this.pressed.add(e.code);
       }
-      return;
-    }
-    held.add(event.code);
-    if (event.code === 'KeyE') actions |= ACT_ENTER;
-    else if (event.code === 'KeyF') actions |= ACT_PUNCH;
-    else if (event.code === 'KeyP' || event.code === 'Escape') actions |= ACT_PAUSE;
-    else if (event.code === 'KeyH') actions |= ACT_HELP;
-    else if (event.code === 'KeyM') actions |= ACT_MUTE;
-    if (FORWARD.has(event.code) || BACK.has(event.code) || LEFT.has(event.code) || RIGHT.has(event.code) || BRAKE.has(event.code)) {
-      event.preventDefault();
-    }
-  });
-  window.addEventListener('keyup', (event) => {
-    held.delete(event.code);
-  });
-  window.addEventListener('blur', () => {
-    held.clear();
-    dragging = false;
-  });
+    });
+    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
+    window.addEventListener('blur', () => this.keys.clear());
 
-  canvas.addEventListener('pointerdown', (event) => {
-    dragging = true;
-    lastX = event.clientX;
-    lastY = event.clientY;
-    canvas.setPointerCapture(event.pointerId);
-  });
-  canvas.addEventListener('pointermove', (event) => {
-    if (!dragging) return;
-    lookDX += event.clientX - lastX;
-    lookDY += event.clientY - lastY;
-    lastX = event.clientX;
-    lastY = event.clientY;
-  });
-  const endDrag = (event) => {
-    if (!dragging) return;
-    const moved = Math.abs(event.clientX - lastX) + Math.abs(event.clientY - lastY);
-    dragging = false;
-    // A click without a drag is a pistol shot.
-    if (moved < 6) actions |= ACT_SHOOT;
-  };
-  canvas.addEventListener('pointerup', endDrag);
-  canvas.addEventListener('pointercancel', () => { dragging = false; });
-  canvas.addEventListener('wheel', (event) => {
-    zoomDelta += event.deltaY;
-    event.preventDefault();
-  }, { passive: false });
+    canvas.addEventListener('mousedown', (e) => {
+      this.dragging = true;
+      this.lastX = e.clientX;
+      this.lastY = e.clientY;
+      if (e.button === 0) this.mouseClicked = true;
+      // Clicking the canvas grabs the pointer so the camera can orbit freely.
+      if (canvas.requestPointerLock) {
+        try { canvas.requestPointerLock(); } catch { /* pointer lock unavailable */ }
+      }
+    });
+    window.addEventListener('mouseup', () => { this.dragging = false; });
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = document.pointerLockElement === canvas;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (this.locked) {
+        this.camYaw -= e.movementX * 0.0032;
+        this.camPitch = Math.max(0.08, Math.min(1.15, this.camPitch + e.movementY * 0.0024));
+      } else if (this.dragging) {
+        this.camYaw -= (e.clientX - this.lastX) * 0.005;
+        this.camPitch = Math.max(0.08, Math.min(1.15, this.camPitch + (e.clientY - this.lastY) * 0.004));
+        this.lastX = e.clientX;
+        this.lastY = e.clientY;
+      }
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
 
-  return {
-    /** -1/0/1 forward, -1/0/1 strafe, run and handbrake flags for this frame. */
-    move() {
-      const fwd = (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
-      const strafe = (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
-      return {
-        forward: fwd,
-        strafe,
-        run: held.has('ShiftLeft') || held.has('ShiftRight'),
-        brake: held.has('Space'),
-      };
-    },
-    /** Mouse-orbit deltas since the last call, in pixels. */
-    takeLook() {
-      const out = { dx: lookDX, dy: lookDY, zoom: zoomDelta };
-      lookDX = 0;
-      lookDY = 0;
-      zoomDelta = 0;
-      return out;
-    },
-    /** One-shot actions since the last call, as ACT_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-    /** Queue an action from outside input (buttons, tests). */
-    queue(action) {
-      actions |= action;
-    },
-  };
+  down(code) { return this.keys.has(code); }
+
+  // True once for a key pressed since the last frame consumed it.
+  takePress(code) {
+    if (this.pressed.has(code)) {
+      this.pressed.delete(code);
+      return true;
+    }
+    return false;
+  }
+
+  takeClick() {
+    const c = this.mouseClicked;
+    this.mouseClicked = false;
+    return c;
+  }
+
+  endFrame() { this.pressed.clear(); }
+
+  // Movement intent in camera space: x = strafe right, z = forward.
+  moveVector() {
+    let x = 0;
+    let z = 0;
+    if (this.down('KeyW') || this.down('ArrowUp')) z += 1;
+    if (this.down('KeyS') || this.down('ArrowDown')) z -= 1;
+    if (this.down('KeyA') || this.down('ArrowLeft')) x -= 1;
+    if (this.down('KeyD') || this.down('ArrowRight')) x += 1;
+    const len = Math.hypot(x, z);
+    if (len > 0) { x /= len; z /= len; }
+    return { x, z };
+  }
+
+  get run() { return this.down('ShiftLeft') || this.down('ShiftRight'); }
 }
