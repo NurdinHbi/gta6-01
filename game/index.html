@@ -1,114 +1,87 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<title>Solmar City — an open-world crime game</title>
-<style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #0e1420;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eef1f5; }
-  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  #hud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 5; }
-  .panel { background: rgba(10, 16, 26, 0.62); border: 1px solid rgba(255,255,255,0.16);
-    border-radius: 10px; padding: 8px 12px; backdrop-filter: blur(2px); }
-  #top-left { position: absolute; top: 14px; left: 14px; min-width: 210px; }
-  #health-bar { width: 180px; height: 12px; background: #222a35; border-radius: 6px; overflow: hidden; margin: 4px 0 2px; }
-  #health-fill { height: 100%; width: 100%; background: #2fd47a; }
-  #health-text, #cash { font-weight: 700; font-size: 15px; }
-  #cash { color: #7dff9b; font-size: 18px; }
-  #top-right { position: absolute; top: 14px; right: 14px; text-align: right; }
-  #stars { font-size: 24px; letter-spacing: 3px; line-height: 1; }
-  #clock { font-size: 20px; font-weight: 700; margin-top: 4px; }
-  #objective { position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-    max-width: 520px; text-align: center; font-size: 14px; line-height: 1.35; }
-  #objective b { color: #7dd8ff; }
-  #message { position: absolute; bottom: 128px; left: 50%; transform: translateX(-50%);
-    font-size: 15px; font-weight: 600; text-align: center; max-width: 640px;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
-  #minimap-wrap { position: absolute; left: 14px; bottom: 14px; }
-  #minimap { width: 200px; height: 200px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.35);
-    background: #20262e; display: block; }
-  #speed { position: absolute; right: 16px; bottom: 44px; font-size: 26px; font-weight: 800;
-    text-shadow: 0 1px 4px rgba(0,0,0,0.8); }
-  #hint { position: absolute; right: 16px; bottom: 14px; font-size: 12px; color: #cfd6de;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.9); }
-  .screen { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
-    background: linear-gradient(160deg, rgba(8,18,34,0.88), rgba(20,8,28,0.82)); z-index: 10; }
-  .card { max-width: 620px; padding: 34px 40px; text-align: center; }
-  .card h1 { margin: 0 0 4px; font-size: 52px; letter-spacing: 2px; color: #ffd23c;
-    text-shadow: 0 3px 0 #c0392b, 0 6px 18px rgba(0,0,0,0.6); }
-  .card h2 { margin: 0 0 14px; font-size: 15px; font-weight: 600; color: #7dd8ff; letter-spacing: 4px; }
-  .card p { font-size: 15px; line-height: 1.55; color: #dfe6ee; }
-  .card .controls { font-size: 13px; line-height: 1.7; color: #aeb8c4; text-align: left;
-    display: inline-block; margin: 10px auto 18px; }
-  .btn { pointer-events: auto; cursor: pointer; display: inline-block; margin: 6px 4px 0;
-    padding: 12px 26px; font-size: 16px; font-weight: 700; color: #101820;
-    background: #ffd23c; border: none; border-radius: 8px; }
-  .btn:hover { background: #ffe27a; }
-  .btn.ghost { background: transparent; color: #eef1f5; border: 2px solid #7dd8ff; }
-  .btn.ghost:hover { background: rgba(125,216,255,0.15); }
-  #end-title { font-size: 64px; color: #ff5a4d; }
-</style>
+<title>Solmar City — 3D Open-World Crime Game</title>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<canvas id="game" aria-label="Solmar City: an open-world crime game. Walk and drive around the city, steal cars, run missions for Mara, and stay ahead of the police."></canvas>
-<p id="status" role="status" aria-live="polite"></p>
+<div id="app"></div>
 
-<div id="hud">
-  <div id="top-left" class="panel">
-    <div>HEALTH <span id="health-text">100</span></div>
-    <div id="health-bar"><div id="health-fill"></div></div>
-    <div id="cash">$0</div>
+<!-- In-game HUD -->
+<div id="hud" class="hidden">
+  <div id="top-right">
+    <div id="stars" title="Wanted level">☆☆☆☆☆</div>
+    <div id="health-row"><span class="hud-label">HP</span><div id="health-bar"><div id="health-fill"></div></div><span id="health-num">100</span></div>
+    <div id="cash-row"><span class="hud-label">$</span><span id="cash">200</span></div>
+    <div id="clock-row"><span id="clock">08:00</span></div>
+    <div id="speed-row" class="hidden"><span id="speed-num">0</span> km/h</div>
+    <div id="weapon-row">Weapon: <span id="weapon-name">Pistol</span> <span class="hint">[1] fists [2] pistol</span></div>
   </div>
-  <div id="top-right" class="panel">
-    <div id="stars">☆☆☆☆☆</div>
-    <div id="clock">09:24</div>
+  <div id="objective-panel">
+    <div id="objective-title">Free Roam</div>
+    <div id="objective-text">Explore Solmar City. Press M for a mission.</div>
+    <div id="objective-timer"></div>
   </div>
-  <div id="objective" class="panel"><b>MARA:</b> <span id="objective-text">Welcome to Solmar City.</span></div>
-  <div id="message"></div>
-  <div id="minimap-wrap"><canvas id="minimap" width="200" height="200"></canvas></div>
-  <div id="speed"></div>
-  <div id="hint"></div>
+  <div id="minimap-wrap"><canvas id="minimap-canvas" width="190" height="190"></canvas><div class="minimap-label">SOLMAR CITY</div></div>
+  <div id="message" class="hidden"></div>
+  <div id="crosshair" class="hidden">+</div>
+  <div id="controls-hint">WASD move &middot; Shift run &middot; E enter/exit car &middot; Click attack &middot; Space handbrake &middot; Esc pause</div>
 </div>
 
-<div id="title-screen" class="screen">
-  <div class="card">
-    <h1>SOLMAR CITY</h1>
-    <h2>AN OPEN-WORLD CRIME GAME</h2>
-    <p>You are new in Solmar City — sun, sea, and a fixer named <b>Mara</b> who pays cash
-    for drivers with nerve. Steal cars, run her four jobs, and stay ahead of the
-    Solmar PD. Every star you earn brings more heat.</p>
+<!-- Title screen -->
+<div id="screen-title" class="screen">
+  <div class="screen-inner">
+    <h1>SOLMAR<br>CITY</h1>
+    <p class="tagline">A 3D open-world crime game. Steal cars. Dodge the law. Work for Mara.</p>
+    <button id="screen-start" class="btn big">Start New Game</button>
+    <button id="screen-continue" class="btn big hidden">Continue</button>
     <div class="controls">
-      WASD move &nbsp;·&nbsp; Shift run &nbsp;·&nbsp; Space jump<br>
-      F punch &nbsp;·&nbsp; 2 pistol, click to shoot &nbsp;·&nbsp; E steal / exit car<br>
-      W/S drive &nbsp;·&nbsp; A/D steer &nbsp;·&nbsp; Space handbrake &nbsp;·&nbsp; P pause &nbsp;·&nbsp; M mute<br>
-      Drag the mouse to look around. Progress saves automatically.
-    </div><br>
-    <button id="start-btn" class="btn">NEW GAME</button>
-    <button id="continue-btn" class="btn ghost" style="display:none">CONTINUE</button>
+      <p><b>WASD</b> move / drive &nbsp; <b>Shift</b> run &nbsp; <b>Mouse drag</b> camera</p>
+      <p><b>E</b> enter / exit car &nbsp; <b>Click</b> punch or shoot &nbsp; <b>1</b> fists <b>2</b> pistol</p>
+      <p><b>Space</b> handbrake &nbsp; <b>M</b> start next mission &nbsp; <b>Esc</b> pause</p>
+      <p>Four missions for the fixer Mara pay $300 – $1,500. Wanted stars 0–5: cops chase from 1 star, police cars from 2. Get busted or wasted and you lose 10% of your cash.</p>
+    </div>
   </div>
 </div>
 
-<div id="pause-screen" class="screen" style="display:none">
-  <div class="card">
-    <h1 style="font-size:40px">PAUSED</h1>
-    <p>Solmar City waits for no one — except right now.</p>
-    <button id="resume-btn" class="btn">RESUME</button>
+<!-- Pause screen -->
+<div id="screen-pause" class="screen hidden">
+  <div class="screen-inner">
+    <h2>PAUSED</h2>
+    <p id="pause-stats"></p>
+    <button id="resume-button" class="btn big">Resume</button>
+    <button id="restart-button" class="btn">Restart Mission</button>
+    <button id="quit-button" class="btn">Quit to Title</button>
   </div>
 </div>
 
-<div id="end-screen" class="screen" style="display:none">
-  <div class="card">
-    <h1 id="end-title">BUSTED</h1>
-    <p id="end-text"></p>
-    <button id="respawn-btn" class="btn">WAKE UP AT THE PLAZA</button>
-    <button id="restart-btn" class="btn ghost">START OVER</button>
+<!-- Busted screen -->
+<div id="screen-busted" class="screen hidden">
+  <div class="screen-inner">
+    <h2 class="busted">BUSTED</h2>
+    <p id="busted-text">The Solmar PD caught up with you.</p>
+    <button id="busted-respawn" class="btn big">Respawn (−10% cash)</button>
   </div>
 </div>
 
-<script src="./vendor/three.min.js"></script>
-<script type="module" src="./src/main.js"></script>
+<!-- Wasted screen -->
+<div id="screen-wasted" class="screen hidden">
+  <div class="screen-inner">
+    <h2 class="wasted">WASTED</h2>
+    <p id="wasted-text">Solmar City chewed you up.</p>
+    <button id="wasted-respawn" class="btn big">Respawn (−10% cash)</button>
+  </div>
+</div>
+
+<script src="vendor/three.min.js"></script>
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/city.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>
