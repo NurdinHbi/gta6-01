@@ -1,87 +1,82 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solmar City — 3D Open-World Crime Game</title>
-<link rel="stylesheet" href="style.css">
+<title>Solmar City — open-world crime game</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<div id="app"></div>
+<canvas id="game" aria-label="Solmar City: an open-world crime game. Drive, run missions for Mara, and stay ahead of the police."></canvas>
 
-<!-- In-game HUD -->
-<div id="hud" class="hidden">
-  <div id="top-right">
-    <div id="stars" title="Wanted level">☆☆☆☆☆</div>
-    <div id="health-row"><span class="hud-label">HP</span><div id="health-bar"><div id="health-fill"></div></div><span id="health-num">100</span></div>
-    <div id="cash-row"><span class="hud-label">$</span><span id="cash">200</span></div>
-    <div id="clock-row"><span id="clock">08:00</span></div>
-    <div id="speed-row" class="hidden"><span id="speed-num">0</span> km/h</div>
-    <div id="weapon-row">Weapon: <span id="weapon-name">Pistol</span> <span class="hint">[1] fists [2] pistol</span></div>
+<div id="hud" class="hidden-until-play">
+  <div id="hud-top-left">
+    <div id="stars" aria-label="wanted level">☆☆☆☆☆</div>
+    <div id="health-row">
+      <div id="health-bar"><div id="health-fill"></div></div>
+      <span id="health-text">100 HP</span>
+    </div>
+    <div id="cash">$200</div>
+    <div id="clock">10:30 ☀</div>
+  </div>
+  <div id="hud-top-right">
+    <div id="speed">0 km/h</div>
+    <div id="weapon">Pistol · ∞</div>
+    <div id="collectibles">Packages 0/12</div>
   </div>
   <div id="objective-panel">
-    <div id="objective-title">Free Roam</div>
-    <div id="objective-text">Explore Solmar City. Press M for a mission.</div>
-    <div id="objective-timer"></div>
+    <div id="mission-name">Free Roam</div>
+    <div id="objective">Press M to start Mara's first mission</div>
   </div>
-  <div id="minimap-wrap"><canvas id="minimap-canvas" width="190" height="190"></canvas><div class="minimap-label">SOLMAR CITY</div></div>
-  <div id="message" class="hidden"></div>
-  <div id="crosshair" class="hidden">+</div>
-  <div id="controls-hint">WASD move &middot; Shift run &middot; E enter/exit car &middot; Click attack &middot; Space handbrake &middot; Esc pause</div>
+  <canvas id="minimap" width="180" height="180" aria-label="minimap"></canvas>
+  <div id="notify" class="hidden"></div>
+  <div id="controls-hint">WASD move · Shift run · E enter car/boat · F punch · Click shoot · 1/2/3 weapons · M mission · P pause · drag to look</div>
 </div>
 
-<!-- Title screen -->
-<div id="screen-title" class="screen">
-  <div class="screen-inner">
-    <h1>SOLMAR<br>CITY</h1>
-    <p class="tagline">A 3D open-world crime game. Steal cars. Dodge the law. Work for Mara.</p>
-    <button id="screen-start" class="btn big">Start New Game</button>
-    <button id="screen-continue" class="btn big hidden">Continue</button>
-    <div class="controls">
-      <p><b>WASD</b> move / drive &nbsp; <b>Shift</b> run &nbsp; <b>Mouse drag</b> camera</p>
-      <p><b>E</b> enter / exit car &nbsp; <b>Click</b> punch or shoot &nbsp; <b>1</b> fists <b>2</b> pistol</p>
-      <p><b>Space</b> handbrake &nbsp; <b>M</b> start next mission &nbsp; <b>Esc</b> pause</p>
-      <p>Four missions for the fixer Mara pay $300 – $1,500. Wanted stars 0–5: cops chase from 1 star, police cars from 2. Get busted or wasted and you lose 10% of your cash.</p>
+<div id="title-screen" class="overlay">
+  <div class="panel">
+    <h1>SOLMAR CITY</h1>
+    <p class="tagline">A sun-soaked coastal city. One fixer named Mara. Eight jobs between you and the top.</p>
+    <div id="mission-list"></div>
+    <div class="buttons">
+      <button id="btn-start">New Game</button>
+      <button id="btn-continue" class="hidden">Continue</button>
+    </div>
+    <p class="controls">WASD move · Shift run · E enter/exit car or boat · F punch · Click shoot · 1 pistol / 2 shotgun / 3 SMG · M start mission · P pause · drag mouse to look around</p>
+    <p class="fine">Steal cars, run Mara's missions, collect the 12 hidden packages, hit the stunt jumps — and mind the stars. Original game, original city, no Rockstar content.</p>
+  </div>
+</div>
+
+<div id="busted-screen" class="overlay hidden">
+  <div class="panel">
+    <h1 class="busted">BUSTED</h1>
+    <p>The Solmar PD caught up with you. You lose 10% of your cash.</p>
+    <div class="buttons"><button id="btn-busted">Back to the streets</button></div>
+  </div>
+</div>
+
+<div id="wasted-screen" class="overlay hidden">
+  <div class="panel">
+    <h1 class="wasted">WASTED</h1>
+    <p>You wake up at the safehouse, lighter by 10% of your cash.</p>
+    <div class="buttons"><button id="btn-wasted">Back to the streets</button></div>
+  </div>
+</div>
+
+<div id="pause-screen" class="overlay hidden">
+  <div class="panel">
+    <h1>PAUSED</h1>
+    <p>Solmar City waits for no one — except right now.</p>
+    <div class="buttons">
+      <button id="btn-resume">Resume</button>
+      <button id="btn-restart">Restart from scratch</button>
     </div>
   </div>
 </div>
 
-<!-- Pause screen -->
-<div id="screen-pause" class="screen hidden">
-  <div class="screen-inner">
-    <h2>PAUSED</h2>
-    <p id="pause-stats"></p>
-    <button id="resume-button" class="btn big">Resume</button>
-    <button id="restart-button" class="btn">Restart Mission</button>
-    <button id="quit-button" class="btn">Quit to Title</button>
-  </div>
-</div>
-
-<!-- Busted screen -->
-<div id="screen-busted" class="screen hidden">
-  <div class="screen-inner">
-    <h2 class="busted">BUSTED</h2>
-    <p id="busted-text">The Solmar PD caught up with you.</p>
-    <button id="busted-respawn" class="btn big">Respawn (−10% cash)</button>
-  </div>
-</div>
-
-<!-- Wasted screen -->
-<div id="screen-wasted" class="screen hidden">
-  <div class="screen-inner">
-    <h2 class="wasted">WASTED</h2>
-    <p id="wasted-text">Solmar City chewed you up.</p>
-    <button id="wasted-respawn" class="btn big">Respawn (−10% cash)</button>
-  </div>
-</div>
-
-<script src="vendor/three.min.js"></script>
-<script src="js/util.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/city.js"></script>
-<script src="js/entities.js"></script>
-<script src="js/missions.js"></script>
-<script src="js/hud.js"></script>
-<script src="js/main.js"></script>
+<p id="status" role="status" aria-live="polite"></p>
+<script src="./three.min.js"></script>
+<script type="module" src="./js/main.js"></script>
 </body>
 </html>

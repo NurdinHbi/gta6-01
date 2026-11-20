@@ -1,347 +1,420 @@
-// Entities for Solmar City: player, cars (parked / traffic / police), pedestrians
-// and foot cops, plus the arcade driving and chase AI. Classic script globals.
-const CAR_COLORS = [0xc0392b, 0x2e6fb0, 0xe8c33a, 0x27ae60, 0x8e44ad, 0xe67e22, 0xdddddd, 0x222831, 0x16a085, 0xd35400, 0x7f8c8d, 0x1abc9c];
+// Solmar City — every moving thing: the player, cars (parked, traffic,
+// police), pedestrians, foot cops, the police helicopter and boats.
+// Authored fresh for round 4 from the design spec.
+const THREE = window.THREE;
+import { makeRng, clamp, lerp, dist2d, angleDelta, angleLerp } from './util.js';
 
-function collideWorld(pos, r, colliders) {
+const CAR_COLORS = [0xc23b2e, 0x2e6fc2, 0xe8c13a, 0x3a3a3a, 0xd8d8d8, 0x2e8a4e, 0x8a4a9e, 0xe07b2e, 0x4a9e9e, 0x9e2e5e];
+const PED_SHIRTS = [0xe84a4a, 0x4a8ae8, 0x4ae84a, 0xe8c13a, 0x9e4ae8, 0xe87b4a, 0x4ad8d8, 0xd8d8d8, 0x3a3a3a, 0xf2a0c0];
+const PED_PANTS = [0x2a3a5a, 0x3a3a3a, 0x5a4a2a, 0x4a5a3a, 0x6a6a6a];
+
+// Push a circle out of every building AABB it overlaps. Returns true if it hit.
+export function resolveCollisions(p, radius, colliders) {
   let hit = false;
-  for (const b of colliders) if (resolveCircleBox(pos, r, b)) hit = true;
+  for (const c of colliders) {
+    const nx = clamp(p.x, c.x - c.hx, c.x + c.hx);
+    const nz = clamp(p.z, c.z - c.hz, c.z + c.hz);
+    const dx = p.x - nx;
+    const dz = p.z - nz;
+    const d2 = dx * dx + dz * dz;
+    if (d2 < radius * radius) {
+      hit = true;
+      if (d2 > 0.0001) {
+        const d = Math.sqrt(d2);
+        p.x = nx + (dx / d) * radius;
+        p.z = nz + (dz / d) * radius;
+      } else {
+        // centre inside the box: push out along the smallest penetration axis
+        const px = c.hx + radius - Math.abs(p.x - c.x);
+        const pz = c.hz + radius - Math.abs(p.z - c.z);
+        if (px < pz) p.x = c.x + (p.x >= c.x ? 1 : -1) * (c.hx + radius);
+        else p.z = c.z + (p.z >= c.z ? 1 : -1) * (c.hz + radius);
+      }
+    }
+  }
   return hit;
 }
 
-// Like collideWorld, but also returns the total push-out vector (pointing away
-// from the walls). Lets drivers slide along a wall instead of stopping dead.
-function collideWorldPush(pos, r, colliders) {
-  let px = 0, pz = 0, hit = false;
-  for (const b of colliders) {
-    const bx = pos.x, bz = pos.z;
-    if (resolveCircleBox(pos, r, b)) { hit = true; px += pos.x - bx; pz += pos.z - bz; }
+// Keep a walker inside the walkable area: city + beach + pier, never the sea.
+// The sea starts at x = -352; the pier (a narrow strip around z = 0) is the
+// one way to walk out past it, to the lighthouse at x = -380.
+export function clampWalkable(p) {
+  p.z = clamp(p.z, -290, 290);
+  if (p.x < -282 && Math.abs(p.z) <= 6.5) {
+    p.x = clamp(p.x, -380, 290); // on the pier
+  } else {
+    p.x = clamp(p.x, -352, 290); // beach and city; the sea is off limits
   }
-  return hit ? { x: px, z: pz } : null;
 }
 
-function pointInColliders(x, z, colliders) {
-  for (const b of colliders) if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) return true;
-  return false;
-}
-
-// ---------- Cars ----------
-function createCarMesh(colorHex, isPolice) {
+export function makeCarMesh(color, kind) {
   const g = new THREE.Group();
-  const paint = new THREE.MeshLambertMaterial({ color: colorHex });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x1a1d22 });
-  const glass = new THREE.MeshLambertMaterial({ color: 0x9fc4d8 });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.55, 4.4), paint);
-  body.position.y = 0.55; g.add(body);
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.5, 2.2), glass);
-  cabin.position.set(0, 1.05, -0.25); g.add(cabin);
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.08, 2.0), paint);
-  roof.position.set(0, 1.32, -0.25); g.add(roof);
-  const wheelGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.28, 10);
-  wheelGeo.rotateZ(Math.PI / 2);
-  const wheels = [];
-  for (const [wx, wz] of [[-0.9, 1.45], [0.9, 1.45], [-0.9, -1.45], [0.9, -1.45]]) {
-    const w = new THREE.Mesh(wheelGeo, dark);
-    w.position.set(wx, 0.34, wz);
-    g.add(w); wheels.push(w);
+  const bodyH = kind === 'van' ? 1.5 : 0.85;
+  const bodyL = kind === 'van' ? 5.4 : kind === 'sport' ? 4.6 : 4.4;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.1, bodyH, bodyL),
+    new THREE.MeshLambertMaterial({ color }));
+  body.position.y = 0.75;
+  body.castShadow = true;
+  g.add(body);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.75, kind === 'van' ? 3.6 : 2.2),
+    new THREE.MeshLambertMaterial({ color: 0x1c2733 }));
+  cabin.position.set(0, bodyH + 0.55, kind === 'van' ? -0.3 : -0.2);
+  cabin.castShadow = true;
+  g.add(cabin);
+  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.35, 10);
+  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
+  for (const [wx, wz] of [[-1.0, 1.5], [1.0, 1.5], [-1.0, -1.5], [1.0, -1.5]]) {
+    const w = new THREE.Mesh(wheelGeo, wheelMat);
+    w.rotation.z = Math.PI / 2;
+    w.position.set(wx, 0.42, wz);
+    g.add(w);
   }
-  const lightMat = new THREE.MeshLambertMaterial({ color: 0xfff6c9, emissive: 0xffedb0, emissiveIntensity: 0.9 });
-  for (const hx of [-0.6, 0.6]) {
-    const h = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, 0.08), lightMat);
-    h.position.set(hx, 0.62, 2.21); g.add(h);
+  const lightMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
+  for (const lx of [-0.7, 0.7]) {
+    const l = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.25, 0.1), lightMat);
+    l.position.set(lx, 0.8, bodyL / 2 + 0.02);
+    g.add(l);
   }
-  const tailMat = new THREE.MeshLambertMaterial({ color: 0xaa1111, emissive: 0x770000, emissiveIntensity: 0.6 });
-  for (const hx of [-0.6, 0.6]) {
-    const t = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.08), tailMat);
-    t.position.set(hx, 0.62, -2.21); g.add(t);
+  if (kind === 'police') {
+    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.25, 0.4),
+      new THREE.MeshBasicMaterial({ color: 0x2244ff }));
+    bar.position.set(0, bodyH + 1.0, -0.2);
+    g.add(bar);
+    const bar2 = bar.clone();
+    bar2.material = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+    bar2.position.z = 0.3;
+    g.add(bar2);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.12, 0.3, bodyL + 0.02),
+      new THREE.MeshLambertMaterial({ color: 0x111111 }));
+    stripe.position.y = 0.75;
+    g.add(stripe);
   }
-  let lightL = null, lightR = null;
-  if (isPolice) {
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.14, 0.4), dark);
-    bar.position.set(0, 1.42, -0.25); g.add(bar);
-    lightL = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.18, 0.42),
-      new THREE.MeshLambertMaterial({ color: 0xff2222, emissive: 0xff0000, emissiveIntensity: 1 }));
-    lightL.position.set(-0.28, 1.44, -0.25); g.add(lightL);
-    lightR = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.18, 0.42),
-      new THREE.MeshLambertMaterial({ color: 0x2244ff, emissive: 0x0022ff, emissiveIntensity: 1 }));
-    lightR.position.set(0.28, 1.44, -0.25); g.add(lightR);
+  if (kind === 'taxi') {
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.3, 0.5),
+      new THREE.MeshBasicMaterial({ color: 0xe8c13a }));
+    sign.position.set(0, bodyH + 1.0, -0.2);
+    g.add(sign);
   }
-  return { group: g, wheels, lightL, lightR };
+  return g;
 }
 
-function makeCar(scene, x, z, heading, colorHex, opts) {
-  const o = opts || {};
-  const mesh = createCarMesh(colorHex, !!o.isPolice);
-  mesh.group.position.set(x, 0, z);
-  mesh.group.rotation.y = heading;
-  scene.add(mesh.group);
-  return {
-    mesh, x, z, heading, speed: 0, steer: 0,
-    isPolice: !!o.isPolice, parked: !!o.parked, traffic: !!o.traffic,
-    ai: o.ai || null, health: 100, color: colorHex,
-    flashT: 0, ramCooldown: 0,
-  };
+export function makePlayerMesh() {
+  const g = new THREE.Group();
+  const shirt = new THREE.MeshLambertMaterial({ color: 0x2e6fc2 });
+  const skin = new THREE.MeshLambertMaterial({ color: 0xd8a077 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x2a2a3a });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.0, 0.5), shirt);
+  body.position.y = 1.15; body.castShadow = true;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 10), skin);
+  head.position.y = 1.95; head.castShadow = true;
+  g.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.14, 12),
+    new THREE.MeshLambertMaterial({ color: 0xc23b2e }));
+  cap.position.y = 2.18;
+  g.add(cap);
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.7, 0.35), pants);
+    leg.position.set(s * 0.22, 0.35, 0);
+    g.add(leg);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.85, 0.28), shirt);
+    arm.position.set(s * 0.56, 1.15, 0);
+    g.add(arm);
+  }
+  return g;
 }
 
-// Arcade driving for the player's car. input: {fwd, back, left, right, brake}.
-// Returns {crashed} when a hard building hit happened this frame.
-function drivePlayerCar(car, input, dt, colliders) {
-  const maxSpeed = 34, maxReverse = 10;
-  const accel = 16, brakeDecel = 26, drag = 0.6;
-  if (input.fwd) car.speed += accel * dt;
-  if (input.back) car.speed -= (car.speed > 0.5 ? brakeDecel : 10) * dt;
-  if (input.brake) car.speed -= Math.sign(car.speed) * brakeDecel * dt;
-  if (!input.fwd && !input.back) car.speed -= Math.sign(car.speed) * drag * 3 * dt;
-  if (Math.abs(car.speed) < 0.15 && !input.fwd && !input.back) car.speed = 0;
-  car.speed = clamp(car.speed, -maxReverse, maxSpeed);
-  const steerTarget = (input.left ? 1 : 0) - (input.right ? 1 : 0);
-  const steerMax = 0.55 * (1 - Math.min(0.6, Math.abs(car.speed) / maxSpeed * 0.7));
-  car.steer = lerp(car.steer, steerTarget * steerMax, clamp(dt * 8, 0, 1));
-  const dirSign = car.speed >= 0 ? 1 : -1;
-  // Steering authority needs a floor: at a crawl the car could barely turn
-  // at all, so it wedged against building corners instead of turning out.
-  // No turn at a dead stop; once rolling, turn like at least 5 u/s.
-  const steerSpeed = Math.abs(car.speed) < 0.5 ? 0 : Math.max(Math.abs(car.speed), 5);
-  car.heading += (car.steer * dirSign * steerSpeed * 0.055) * dt * (input.brake ? 1.35 : 1);
-  const nx = car.x + Math.sin(car.heading) * car.speed * dt;
-  const nz = car.z + Math.cos(car.heading) * car.speed * dt;
-  const pos = { x: nx, z: nz };
-  const push = collideWorldPush(pos, 1.6, colliders);
-  let crashed = false;
-  if (push) {
-    // Wall slide: a graze just scrubs a little speed; only a near head-on
-    // impact counts as a crash. Scraping used to multiply speed by 0.4 every
-    // frame, which pinned the car against the wall forever.
-    const pl = Math.hypot(push.x, push.z) || 1;
-    const fwdX = Math.sin(car.heading), fwdZ = Math.cos(car.heading);
-    const intoWall = -(fwdX * (push.x / pl) + fwdZ * (push.z / pl));
-    if (intoWall > 0.65) {
-      if (Math.abs(car.speed) > 14) { crashed = true; car.speed *= -0.25; }
-      else car.speed *= 0.4;
-    } else car.speed *= 0.985;
-    car.x = pos.x; car.z = pos.z;
-  } else { car.x = nx; car.z = nz; }
-  // Beach / pier is foot-only: cars stop at the sand.
-  if (car.z > 150) { car.z = 150; if (car.speed > 0) car.speed *= 0.5; }
-  car.x = clamp(car.x, -160, 160);
-  car.z = clamp(car.z, -160, 150);
-  car.mesh.group.position.set(car.x, 0, car.z);
-  car.mesh.group.rotation.y = car.heading;
-  for (const w of car.mesh.wheels) w.rotation.x += car.speed * dt * 2.2;
-  if (car.mesh.wheels[0]) car.mesh.wheels[0].rotation.y = car.steer * 0.5;
-  if (car.mesh.wheels[1]) car.mesh.wheels[1].rotation.y = car.steer * 0.5;
-  return { crashed };
+function makePedMesh(shirtColor, pantsColor) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.95, 0.45),
+    new THREE.MeshLambertMaterial({ color: shirtColor }));
+  body.position.y = 1.1; body.castShadow = true;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8),
+    new THREE.MeshLambertMaterial({ color: 0xd8a077 }));
+  head.position.y = 1.85;
+  g.add(head);
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.65, 0.32),
+      new THREE.MeshLambertMaterial({ color: pantsColor }));
+    leg.position.set(s * 0.2, 0.33, 0);
+    g.add(leg);
+  }
+  return g;
 }
 
-// ---------- Traffic AI ----------
-function spawnTraffic(scene, rng, count) {
+function makeCopMesh() {
+  const g = new THREE.Group();
+  const navy = new THREE.MeshLambertMaterial({ color: 0x1e2a4a });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 0.5), navy);
+  body.position.y = 1.15; body.castShadow = true;
+  g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 10, 8),
+    new THREE.MeshLambertMaterial({ color: 0xd8a077 }));
+  head.position.y = 1.95;
+  g.add(head);
+  const hat = new THREE.Mesh(new THREE.CylinderGeometry(0.33, 0.33, 0.16, 12), navy);
+  hat.position.y = 2.16;
+  g.add(hat);
+  const badge = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.2, 0.05),
+    new THREE.MeshBasicMaterial({ color: 0xe8c13a }));
+  badge.position.set(0.2, 1.35, 0.28);
+  g.add(badge);
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.7, 0.35), navy);
+    leg.position.set(s * 0.22, 0.35, 0);
+    g.add(leg);
+  }
+  return g;
+}
+
+export function makeBoatMesh(color) {
+  const g = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 7),
+    new THREE.MeshLambertMaterial({ color }));
+  hull.position.y = 0.45; hull.castShadow = true;
+  g.add(hull);
+  const bow = new THREE.Mesh(new THREE.ConeGeometry(1.2, 2.2, 4),
+    new THREE.MeshLambertMaterial({ color }));
+  bow.rotation.x = Math.PI / 2; bow.rotation.y = Math.PI / 4;
+  bow.position.set(0, 0.45, 4.4);
+  g.add(bow);
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.9, 2.4),
+    new THREE.MeshLambertMaterial({ color: 0xf2f2f2 }));
+  cabin.position.set(0, 1.3, -0.5);
+  g.add(cabin);
+  return g;
+}
+
+export function makeHeliMesh() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.6, 5.2),
+    new THREE.MeshLambertMaterial({ color: 0x1e2a4a }));
+  body.castShadow = true;
+  g.add(body);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(2.0, 1.0, 1.6),
+    new THREE.MeshLambertMaterial({ color: 0x9dc4d8 }));
+  glass.position.set(0, 0.1, 2.2);
+  g.add(glass);
+  const rotor = new THREE.Mesh(new THREE.BoxGeometry(9, 0.12, 0.5),
+    new THREE.MeshLambertMaterial({ color: 0x222222 }));
+  rotor.position.y = 1.1;
+  g.add(rotor);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 4.4),
+    new THREE.MeshLambertMaterial({ color: 0x1e2a4a }));
+  tail.position.set(0, 0.3, -4.4);
+  g.add(tail);
+  const beam = new THREE.Mesh(new THREE.ConeGeometry(4.5, 26, 16, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2b0, transparent: true, opacity: 0.14, side: THREE.DoubleSide }));
+  beam.position.y = -13;
+  beam.rotation.x = Math.PI;
+  g.add(beam);
+  g.userData.rotor = rotor;
+  return g;
+}
+
+export function spawnParkedCars(scene, rng, city) {
   const cars = [];
-  for (let i = 0; i < count; i++) {
-    const axis = rng() < 0.5 ? 'x' : 'z';
-    const road = CITY.ROAD_CENTERS[Math.floor(rng() * CITY.ROAD_CENTERS.length)];
-    const dir = rng() < 0.5 ? 1 : -1;
-    const laneOff = dir === 1 ? 2.2 : -2.2;
-    const pos = -140 + rng() * 280;
-    const color = CAR_COLORS[Math.floor(rng() * CAR_COLORS.length)];
-    const c = makeCar(scene, 0, 0, 0, color, { traffic: true });
-    c.ai = { axis, lane: road + laneOff, pos, dir, speed: 7 + rng() * 4, turnCooldown: 0 };
-    cars.push(c);
+  const kinds = ['sedan', 'sport', 'van', 'taxi', 'sedan', 'sport'];
+  for (let i = 0; i < 12; i += 1) {
+    const street = rng.pick(city.streetX);
+    const along = rng.range(-260, 260);
+    const side = rng.chance(0.5) ? 1 : -1;
+    const horizontal = rng.chance(0.5);
+    const x = horizontal ? along : street + side * 5.2;
+    const z = horizontal ? street + side * 5.2 : along;
+    const angle = horizontal ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2);
+    const kind = kinds[i % kinds.length];
+    const color = CAR_COLORS[rng.int(0, CAR_COLORS.length - 1)];
+    const mesh = makeCarMesh(color, kind);
+    mesh.position.set(x, 0, z);
+    mesh.rotation.y = angle;
+    scene.add(mesh);
+    cars.push({ mesh, x, z, angle, speed: 0, kind, color, parked: true, stealable: true, health: 100 });
   }
   return cars;
 }
 
-function updateTraffic(cars, dt, rng) {
-  for (const c of cars) {
-    const a = c.ai;
-    a.turnCooldown -= dt;
-    a.pos += a.dir * a.speed * dt;
-    // At an intersection, sometimes turn onto the crossing road.
-    if (a.turnCooldown <= 0) {
-      for (const rc of CITY.ROAD_CENTERS) {
-        if (Math.abs(a.pos - rc) < 1.4) {
-          if (rng() < 0.35) {
-            const newDir = rng() < 0.5 ? 1 : -1;
-            const oldAxis = a.axis;
-            a.axis = oldAxis === 'x' ? 'z' : 'x';
-            const newLane = rc + (newDir === 1 ? 2.2 : -2.2);
-            a.pos = a.lane;
-            a.lane = newLane;
-            a.dir = newDir;
-            a.turnCooldown = 4;
-          } else a.turnCooldown = 1.5;
-          break;
-        }
-      }
-    }
-    if (a.pos > 148 || a.pos < -148) { a.dir *= -1; a.pos = clamp(a.pos, -148, 148); a.turnCooldown = 2; }
-    if (a.axis === 'x') { c.x = a.pos; c.z = a.lane; c.heading = a.dir > 0 ? Math.PI / 2 : -Math.PI / 2; }
-    else { c.x = a.lane; c.z = a.pos; c.heading = a.dir > 0 ? 0 : Math.PI; }
-    c.speed = a.speed;
-    c.mesh.group.position.set(c.x, 0, c.z);
-    c.mesh.group.rotation.y = c.heading;
+export function spawnTraffic(scene, rng, city) {
+  const cars = [];
+  for (let i = 0; i < 10; i += 1) {
+    const route = city.trafficRoutes[i % city.trafficRoutes.length];
+    const wp = rng.int(0, route.length - 1);
+    const start = route[wp];
+    const kind = rng.pick(['sedan', 'sedan', 'sport', 'van', 'taxi']);
+    const color = CAR_COLORS[rng.int(0, CAR_COLORS.length - 1)];
+    const mesh = makeCarMesh(color, kind);
+    mesh.position.set(start.x, 0, start.z);
+    scene.add(mesh);
+    cars.push({
+      mesh, x: start.x, z: start.z, angle: 0, speed: rng.range(6, 9),
+      kind, color, parked: false, route, wpIndex: (wp + 1) % route.length,
+      cruise: rng.range(6, 10),
+    });
   }
+  return cars;
 }
 
-// ---------- People ----------
-function createPersonMesh(shirtHex, pantsHex, isCop) {
-  const g = new THREE.Group();
-  const skin = new THREE.MeshLambertMaterial({ color: 0xd9a066 });
-  const shirt = new THREE.MeshLambertMaterial({ color: shirtHex });
-  const pants = new THREE.MeshLambertMaterial({ color: pantsHex });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.72, 0.36), shirt);
-  torso.position.y = 1.12; g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.24, 10, 8), skin);
-  head.position.y = 1.68; g.add(head);
-  if (isCop) {
-    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.26, 0.1, 10),
-      new THREE.MeshLambertMaterial({ color: 0x14264a }));
-    cap.position.y = 1.88; g.add(cap);
-  } else {
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(0.25, 10, 8),
-      new THREE.MeshLambertMaterial({ color: 0x2b2018 }));
-    hair.position.y = 1.76; hair.scale.set(1, 0.6, 1); g.add(hair);
+export function updateTrafficCar(car, dt, colliders) {
+  const target = car.route[car.wpIndex];
+  const dx = target.x - car.x;
+  const dz = target.z - car.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 3) {
+    car.wpIndex = (car.wpIndex + 1) % car.route.length;
+    return;
   }
-  const legL = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.72, 0.24), pants);
-  legL.geometry.translate(0, -0.36, 0); legL.position.set(-0.16, 0.74, 0); g.add(legL);
-  const legR = legL.clone(); legR.position.x = 0.16; g.add(legR);
-  const armGeo = new THREE.BoxGeometry(0.16, 0.6, 0.18);
-  armGeo.translate(0, -0.3, 0);
-  const armL = new THREE.Mesh(armGeo, shirt); armL.position.set(-0.4, 1.44, 0); g.add(armL);
-  const armR = new THREE.Mesh(armGeo, shirt); armR.position.set(0.4, 1.44, 0); g.add(armR);
-  return { group: g, legL, legR, armL, armR };
+  const wantAngle = Math.atan2(dx, dz);
+  car.angle = angleLerp(car.angle, wantAngle, dt * 2.2);
+  const align = Math.cos(angleDelta(car.angle, wantAngle));
+  const speed = car.cruise * clamp(align, 0.2, 1);
+  car.x += Math.sin(car.angle) * speed * dt;
+  car.z += Math.cos(car.angle) * speed * dt;
+  car.mesh.position.set(car.x, 0, car.z);
+  car.mesh.rotation.y = car.angle;
 }
 
-function makePlayerMesh() {
-  const m = createPersonMesh(0xd8d8d8, 0x2c3e50, false);
-  // Player jacket: bright so the player is easy to spot.
-  m.group.children[0].material = new THREE.MeshLambertMaterial({ color: 0xff5a3c });
-  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.14, 0.42),
-    new THREE.MeshLambertMaterial({ color: 0x111111 }));
-  gun.position.set(0.4, 1.0, 0.25);
-  m.group.add(gun);
-  return { ...m, gun };
+// Arcade driving: throttle, steering that bites harder at speed, handbrake slide.
+export function driveCar(car, input, dt, colliders, onCrash) {
+  const maxSpeed = car.kind === 'sport' ? 34 : car.kind === 'van' ? 24 : 29;
+  const accel = 16;
+  if (input.forward) car.speed += accel * dt;
+  if (input.back) car.speed -= (car.speed > 0.5 ? 26 : 10) * dt;
+  if (!input.forward && !input.back) car.speed -= Math.sign(car.speed) * 6 * dt;
+  if (Math.abs(car.speed) < 0.15 && !input.forward) car.speed = 0;
+  car.speed = clamp(car.speed, -9, maxSpeed);
+  const steerInput = (input.left ? -1 : 0) + (input.right ? 1 : 0);
+  const speedFactor = clamp(Math.abs(car.speed) / 12, 0.25, 1);
+  const grip = input.handbrake ? 0.45 : 1;
+  car.angle += steerInput * 1.9 * speedFactor * grip * dt * Math.sign(car.speed || 1);
+  const nx = car.x + Math.sin(car.angle) * car.speed * dt;
+  const nz = car.z + Math.cos(car.angle) * car.speed * dt;
+  const trial = { x: nx, z: nz };
+  const hitWall = resolveCollisions(trial, 1.6, colliders);
+  if (trial.x < -350) trial.x = -350; // never drive into the sea
+  if (trial.x > 286) trial.x = 286;
+  if (trial.z < -286) trial.z = -286;
+  if (trial.z > 286) trial.z = 286;
+  if (hitWall && Math.abs(car.speed) > 8 && onCrash) onCrash(Math.abs(car.speed));
+  if (hitWall) car.speed *= 0.45;
+  car.x = trial.x; car.z = trial.z;
+  // Stunt ramps: crossing one fast launches the car.
+  car.mesh.position.set(car.x, car.y || 0, car.z);
+  car.mesh.rotation.y = car.angle;
+  car.mesh.rotation.z = input.handbrake && Math.abs(car.speed) > 10 ? -steerInput * 0.08 : 0;
 }
 
-function spawnPeds(scene, rng, count, colliders) {
-  const shirts = [0xe74c3c, 0x3498db, 0x2ecc71, 0xf39c12, 0x9b59b6, 0x1abc9c, 0xecf0f1, 0xfd79a8];
+export function spawnPedestrians(scene, rng, city) {
   const peds = [];
-  for (let i = 0; i < count; i++) {
-    const m = createPersonMesh(shirts[i % shirts.length], 0x2c3e50, false);
-    const x = -145 + rng() * 290, z = -145 + rng() * 290;
-    m.group.position.set(x, 0, z);
-    scene.add(m.group);
+  for (let i = 0; i < 24; i += 1) {
+    const street = rng.pick(city.streetX);
+    const along = rng.range(-260, 260);
+    const horizontal = rng.chance(0.5);
+    const x = horizontal ? along : street + rng.pick([-9, 9]);
+    const z = horizontal ? street + rng.pick([-9, 9]) : along;
+    const mesh = makePedMesh(
+      PED_SHIRTS[rng.int(0, PED_SHIRTS.length - 1)],
+      PED_PANTS[rng.int(0, PED_PANTS.length - 1)]);
+    mesh.position.set(x, 0, z);
+    scene.add(mesh);
     peds.push({
-      mesh: m, x, z, heading: rng() * Math.PI * 2, speed: 1.3 + rng() * 0.5,
-      state: 'walk', tx: x, tz: z, health: 50, fleeT: 0, walkPhase: rng() * 6, downT: 0,
+      mesh, x, z, angle: rng.range(0, Math.PI * 2),
+      speed: rng.range(1.2, 2.6), target: null, scared: 0, alive: true,
+      walkPhase: rng.range(0, 6),
     });
   }
   return peds;
 }
 
-function pickPedTarget(p, rng, colliders) {
-  for (let tries = 0; tries < 8; tries++) {
-    const bx = CITY.MIN + Math.floor(rng() * CITY.GRID) * CITY.PITCH;
-    const bz = CITY.MIN + Math.floor(rng() * CITY.GRID) * CITY.PITCH;
-    const x = bx + 2 + rng() * 16, z = bz + 2 + rng() * 16;
-    if (!pointInColliders(x, z, colliders)) { p.tx = x; p.tz = z; return; }
+export function updatePedestrian(ped, dt, rng, city, danger) {
+  if (!ped.alive) return;
+  if (ped.scared > 0) {
+    ped.scared -= dt;
+    ped.speed = 5.5;
+  } else {
+    ped.speed = ped.baseSpeed || 1.8;
   }
-  p.tx = p.x + (rng() - 0.5) * 20; p.tz = p.z + (rng() - 0.5) * 20;
-}
-
-function updatePeds(peds, dt, rng, colliders, threat) {
-  for (const p of peds) {
-    if (p.state === 'down') {
-      p.downT -= dt;
-      p.mesh.group.rotation.x = lerp(p.mesh.group.rotation.x, -Math.PI / 2 * 0.9, dt * 4);
-      if (p.downT <= 0) { p.state = 'walk'; p.health = 50; p.mesh.group.rotation.x = 0; pickPedTarget(p, rng, colliders); }
-      continue;
-    }
-    if (threat && dist2(p.x, p.z, threat.x, threat.z) < 9) { p.state = 'flee'; p.fleeT = 3; }
-    if (p.state === 'flee') {
-      p.fleeT -= dt;
-      const a = Math.atan2(p.x - threat.x, p.z - threat.z);
-      p.heading = angLerp(p.heading, a, dt * 6);
-      const sp = 3.6;
-      const pos = { x: p.x + Math.sin(p.heading) * sp * dt, z: p.z + Math.cos(p.heading) * sp * dt };
-      collideWorld(pos, 0.4, colliders);
-      p.x = clamp(pos.x, -160, 160); p.z = clamp(pos.z, -160, 244);
-      if (p.fleeT <= 0) { p.state = 'walk'; pickPedTarget(p, rng, colliders); }
+  if (!ped.target || dist2d(ped.x, ped.z, ped.target.x, ped.target.z) < 4) {
+    if (ped.scared > 0 && danger) {
+      const a = Math.atan2(ped.x - danger.x, ped.z - danger.z);
+      ped.target = { x: ped.x + Math.sin(a) * 40, z: ped.z + Math.cos(a) * 40 };
     } else {
-      const d = dist2(p.x, p.z, p.tx, p.tz);
-      if (d < 1.2) { pickPedTarget(p, rng, colliders); continue; }
-      const a = Math.atan2(p.tx - p.x, p.tz - p.z);
-      p.heading = angLerp(p.heading, a, dt * 5);
-      const pos = { x: p.x + Math.sin(p.heading) * p.speed * dt, z: p.z + Math.cos(p.heading) * p.speed * dt };
-      collideWorld(pos, 0.4, colliders);
-      p.x = clamp(pos.x, -160, 160); p.z = clamp(pos.z, -160, 244);
+      const street = rng.pick(city.streetX);
+      const along = rng.range(-260, 260);
+      const horizontal = rng.chance(0.5);
+      ped.target = horizontal
+        ? { x: along, z: street + rng.pick([-9, 9]) }
+        : { x: street + rng.pick([-9, 9]), z: along };
     }
-    p.walkPhase += dt * (p.state === 'flee' ? 11 : 7);
-    const sw = Math.sin(p.walkPhase) * 0.5;
-    p.mesh.legL.rotation.x = sw; p.mesh.legR.rotation.x = -sw;
-    p.mesh.armL.rotation.x = -sw * 0.7; p.mesh.armR.rotation.x = sw * 0.7;
-    p.mesh.group.position.set(p.x, 0, p.z);
-    p.mesh.group.rotation.y = p.heading;
   }
+  const want = Math.atan2(ped.target.x - ped.x, ped.target.z - ped.z);
+  ped.angle = angleLerp(ped.angle, want, dt * 3);
+  ped.x += Math.sin(ped.angle) * ped.speed * dt;
+  ped.z += Math.cos(ped.angle) * ped.speed * dt;
+  clampWalkable(ped);
+  ped.walkPhase += dt * ped.speed * 2.2;
+  ped.mesh.position.set(ped.x, Math.abs(Math.sin(ped.walkPhase)) * 0.08, ped.z);
+  ped.mesh.rotation.y = ped.angle;
+  ped.mesh.rotation.z = Math.sin(ped.walkPhase) * 0.05;
 }
 
-// ---------- Foot cops ----------
-function spawnFootCop(scene, x, z) {
-  const m = createPersonMesh(0x1c3d6e, 0x14264a, true);
-  m.group.position.set(x, 0, z);
-  scene.add(m.group);
-  return { mesh: m, x, z, heading: 0, speed: 5.2, bustT: 0, walkPhase: 0 };
+export function spawnCop(scene, x, z) {
+  const mesh = makeCopMesh();
+  mesh.position.set(x, 0, z);
+  scene.add(mesh);
+  return { mesh, x, z, angle: 0, speed: 4.6, health: 60, punchTimer: 0, bustedHold: 0, alive: true };
 }
 
-function updateFootCops(cops, dt, player, wanted, colliders) {
-  let busted = false;
-  for (const c of cops) {
-    const d = dist2(c.x, c.z, player.x, player.z);
-    if (wanted >= 1 && !player.inCar) {
-      const a = Math.atan2(player.x - c.x, player.z - c.z);
-      c.heading = angLerp(c.heading, a, dt * 6);
-      const sp = c.speed;
-      const pos = { x: c.x + Math.sin(c.heading) * sp * dt, z: c.z + Math.cos(c.heading) * sp * dt };
-      collideWorld(pos, 0.4, colliders);
-      c.x = clamp(pos.x, -160, 160); c.z = clamp(pos.z, -160, 244);
-      if (d < 2.3) { c.bustT += dt; if (c.bustT > 1.2) busted = true; }
-      else c.bustT = Math.max(0, c.bustT - dt * 2);
-    } else if (wanted >= 1 && player.inCar) {
-      // Cops give up the foot chase against a car: hold position, watch.
-      c.bustT = Math.max(0, c.bustT - dt);
-    } else {
-      c.bustT = 0;
-    }
-    c.walkPhase += dt * 9;
-    const sw = Math.sin(c.walkPhase) * 0.55;
-    c.mesh.legL.rotation.x = sw; c.mesh.legR.rotation.x = -sw;
-    c.mesh.group.position.set(c.x, 0, c.z);
-    c.mesh.group.rotation.y = c.heading;
+export function updateCop(cop, dt, player, colliders) {
+  if (!cop.alive) return;
+  const d = dist2d(cop.x, cop.z, player.x, player.z);
+  const want = Math.atan2(player.x - cop.x, player.z - cop.z);
+  cop.angle = angleLerp(cop.angle, want, dt * 4);
+  if (d > 1.6) {
+    cop.x += Math.sin(cop.angle) * cop.speed * dt;
+    cop.z += Math.cos(cop.angle) * cop.speed * dt;
+    resolveCollisions(cop, 0.6, colliders);
+    clampWalkable(cop);
   }
-  return busted;
-}
-
-// ---------- Police cars ----------
-function spawnPoliceCar(scene, x, z, heading) {
-  const c = makeCar(scene, x, z, heading, 0xf2f2f2, { isPolice: true });
-  c.speed = 0;
-  return c;
-}
-
-function updatePoliceCars(cars, dt, player, colliders) {
-  for (const c of cars) {
-    c.flashT += dt;
-    const on = Math.floor(c.flashT * 6) % 2 === 0;
-    if (c.mesh.lightL) c.mesh.lightL.material.emissiveIntensity = on ? 1.6 : 0.15;
-    if (c.mesh.lightR) c.mesh.lightR.material.emissiveIntensity = on ? 0.15 : 1.6;
-    const d = dist2(c.x, c.z, player.x, player.z);
-    const targetHeading = Math.atan2(player.x - c.x, player.z - c.z);
-    const turn = clamp(angDiff(c.heading, targetHeading), -1, 1);
-    const wantSpeed = d > 6 ? 26 : 12;
-    c.speed = lerp(c.speed, wantSpeed, clamp(dt * 0.8, 0, 1));
-    c.heading += turn * clamp(dt * 2.2, 0, 1) * (c.speed > 1 ? 1 : 0);
-    const pos = { x: c.x + Math.sin(c.heading) * c.speed * dt, z: c.z + Math.cos(c.heading) * c.speed * dt };
-    collideWorld(pos, 1.6, colliders);
-    c.x = clamp(pos.x, -160, 160); c.z = clamp(pos.z, -160, 150);
-    c.mesh.group.position.set(c.x, 0, c.z);
-    c.mesh.group.rotation.y = c.heading;
+  cop.mesh.position.set(cop.x, 0, cop.z);
+  cop.mesh.rotation.y = cop.angle;
+  // Punch the player up close; hold them for a bust.
+  cop.punchTimer -= dt;
+  if (d < 1.9 && cop.punchTimer <= 0) {
+    cop.punchTimer = 0.9;
+    return 'punch';
   }
+  if (d < 2.2) {
+    cop.bustedHold += dt;
+    if (cop.bustedHold > 2.5) return 'busted';
+  } else {
+    cop.bustedHold = Math.max(0, cop.bustedHold - dt);
+  }
+  return null;
+}
+
+export function spawnPoliceCar(scene, x, z) {
+  const mesh = makeCarMesh(0x1e2a4a, 'police');
+  mesh.position.set(x, 0, z);
+  scene.add(mesh);
+  return { mesh, x, z, angle: 0, speed: 0, kind: 'police', color: 0x1e2a4a, parked: false, health: 120 };
+}
+
+export function updatePoliceCar(car, dt, player, colliders, onCrash) {
+  const d = dist2d(car.x, car.z, player.x, player.z);
+  const want = Math.atan2(player.x - car.x, player.z - car.z);
+  car.angle = angleLerp(car.angle, want, dt * 1.6);
+  const targetSpeed = d > 6 ? 30 : 12;
+  car.speed = lerp(car.speed, targetSpeed, dt * 0.8);
+  const nx = car.x + Math.sin(car.angle) * car.speed * dt;
+  const nz = car.z + Math.cos(car.angle) * car.speed * dt;
+  const trial = { x: nx, z: nz };
+  const hitWall = resolveCollisions(trial, 1.6, colliders);
+  if (hitWall) car.speed *= 0.4;
+  car.x = clamp(trial.x, -282, 286);
+  car.z = clamp(trial.z, -286, 286);
+  car.mesh.position.set(car.x, 0, car.z);
+  car.mesh.rotation.y = car.angle;
+  if (d < 3.2 && Math.abs(car.speed) > 4 && onCrash) onCrash(car);
+  return d;
 }

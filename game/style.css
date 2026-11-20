@@ -1,51 +1,45 @@
-* { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; font-family: "Segoe UI", Arial, sans-serif; color: #f2f2f2; }
-#app, #app canvas { position: fixed; inset: 0; display: block; }
+/* Solmar City — HUD and menu styling. Authored fresh for round 4. */
+html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1026; font-family: "Segoe UI", system-ui, sans-serif; }
+#game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+#status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .hidden { display: none !important; }
 
-/* ---------- HUD ---------- */
-#hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
-#top-right { position: absolute; top: 14px; right: 16px; text-align: right; font-size: 17px; text-shadow: 0 2px 4px #000; }
-#stars { font-size: 26px; letter-spacing: 3px; color: #ffd23e; min-height: 32px; }
-#stars.hot { color: #ff5252; animation: blink 0.7s steps(2) infinite; }
-@keyframes blink { 50% { opacity: 0.45; } }
-#health-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 2px; }
-.hud-label { font-weight: 700; font-size: 13px; color: #cfd6dd; }
-#health-bar { width: 150px; height: 12px; background: rgba(0,0,0,0.55); border: 1px solid #888; border-radius: 3px; overflow: hidden; }
-#health-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #37d67a, #7be495); }
-#health-fill.low { background: linear-gradient(90deg, #e33, #f66); }
-#cash-row { font-size: 22px; font-weight: 800; color: #7be495; margin-top: 2px; }
-#clock-row { font-size: 15px; color: #dfe6ec; }
-#speed-row { font-size: 20px; font-weight: 800; color: #fff; }
-#weapon-row { font-size: 13px; color: #cfd6dd; }
-#weapon-row .hint { color: #9aa7b1; font-size: 12px; }
+#hud { position: fixed; inset: 0; pointer-events: none; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); z-index: 5; }
+#hud-top-left { position: absolute; top: 14px; left: 16px; }
+#stars { font-size: 30px; letter-spacing: 4px; color: #ffd21a; line-height: 1; }
+#stars.hot { color: #ff5533; animation: pulse .5s infinite alternate; }
+@keyframes pulse { from { opacity: 1; } to { opacity: .55; } }
+#health-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+#health-bar { width: 150px; height: 12px; background: rgba(0,0,0,.55); border: 1px solid rgba(255,255,255,.6); border-radius: 6px; overflow: hidden; }
+#health-fill { height: 100%; width: 100%; background: #3ddc5a; }
+#health-fill.low { background: #ff4433; }
+#health-text { font-size: 13px; font-weight: 600; }
+#cash { font-size: 26px; font-weight: 800; color: #7dff8a; margin-top: 6px; }
+#clock { font-size: 17px; font-weight: 600; margin-top: 2px; }
+#hud-top-right { position: absolute; top: 14px; right: 16px; text-align: right; }
+#speed { font-size: 26px; font-weight: 800; }
+#weapon { font-size: 15px; font-weight: 600; margin-top: 2px; }
+#collectibles { font-size: 13px; margin-top: 2px; color: #ffd21a; }
+#objective-panel { position: absolute; left: 16px; bottom: 16px; background: rgba(0,0,0,.55); border-left: 4px solid #ffd21a; padding: 10px 14px; border-radius: 4px; max-width: 420px; }
+#mission-name { font-size: 15px; font-weight: 800; color: #ffd21a; }
+#objective { font-size: 14px; margin-top: 2px; }
+#minimap { position: absolute; right: 16px; bottom: 16px; width: 180px; height: 180px; border: 2px solid rgba(255,255,255,.75); border-radius: 50%; background: #222; box-shadow: 0 2px 12px rgba(0,0,0,.5); }
+#notify { position: absolute; top: 18%; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.72); padding: 10px 18px; border-radius: 6px; font-size: 16px; font-weight: 600; max-width: 640px; text-align: center; }
+#controls-hint { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: .75; white-space: nowrap; }
 
-#objective-panel { position: absolute; top: 14px; left: 16px; max-width: 330px; background: rgba(8,12,18,0.62); border-left: 4px solid #ffd23e; padding: 10px 12px; border-radius: 4px; }
-#objective-title { font-size: 17px; font-weight: 800; color: #ffd23e; letter-spacing: 0.4px; }
-#objective-text { font-size: 14px; line-height: 1.45; margin-top: 3px; color: #eef2f5; }
-#objective-timer { font-size: 20px; font-weight: 800; color: #fff; margin-top: 4px; }
-#objective-timer.urgent { color: #ff5252; }
-
-#minimap-wrap { position: absolute; left: 16px; bottom: 16px; background: rgba(8,12,18,0.7); padding: 5px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); }
-#minimap-canvas { display: block; border-radius: 3px; }
-.minimap-label { text-align: center; font-size: 11px; letter-spacing: 2px; color: #b9c4cd; padding-top: 3px; }
-
-#message { position: absolute; top: 22%; left: 50%; transform: translateX(-50%); background: rgba(8,12,18,0.78); border: 1px solid #ffd23e; color: #fff; font-size: 19px; font-weight: 700; padding: 12px 22px; border-radius: 6px; text-align: center; max-width: 640px; }
-#crosshair { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 26px; font-weight: 900; color: rgba(255,255,255,0.85); text-shadow: 0 0 4px #000; }
-#controls-hint { position: absolute; bottom: 16px; right: 16px; font-size: 12px; color: rgba(255,255,255,0.75); text-shadow: 0 1px 3px #000; text-align: right; }
-
-/* ---------- Screens ---------- */
-.screen { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: linear-gradient(160deg, rgba(10,14,24,0.88), rgba(30,10,40,0.82)); }
-.screen-inner { text-align: center; max-width: 620px; padding: 30px; }
-.screen h1 { font-size: 84px; line-height: 0.95; letter-spacing: 4px; font-weight: 900; color: #ffd23e; text-shadow: 0 4px 0 #b3541e, 0 10px 30px rgba(0,0,0,0.8); }
-.screen h2 { font-size: 52px; letter-spacing: 3px; font-weight: 900; }
-.screen h2.busted { color: #5aa9ff; }
-.screen h2.wasted { color: #ff5252; }
-.tagline { margin: 14px 0 22px; font-size: 17px; color: #dfe6ec; }
-.controls { margin-top: 22px; font-size: 14px; line-height: 1.65; color: #b9c4cd; text-align: left; background: rgba(255,255,255,0.06); padding: 12px 16px; border-radius: 6px; }
-.controls b { color: #ffd23e; }
-.btn { pointer-events: auto; cursor: pointer; display: inline-block; margin: 6px 4px; padding: 12px 26px; font-size: 16px; font-weight: 800; letter-spacing: 0.5px; color: #111; background: #ffd23e; border: none; border-radius: 6px; }
-.btn:hover { background: #ffe066; }
-.btn.big { font-size: 19px; padding: 14px 34px; }
-#screen-pause .btn, #screen-busted .btn, #screen-wasted .btn { background: #e8eef2; }
-#pause-stats { color: #dfe6ec; margin: 10px 0 16px; font-size: 15px; line-height: 1.6; }
+.overlay { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(160deg, rgba(10,16,38,.82), rgba(60,20,10,.78)); z-index: 10; }
+.overlay .panel { background: rgba(8,10,20,.88); border: 1px solid rgba(255,210,26,.5); border-radius: 12px; padding: 28px 34px; max-width: 560px; text-align: center; color: #fff; box-shadow: 0 10px 50px rgba(0,0,0,.6); }
+.overlay h1 { margin: 0 0 8px; font-size: 52px; letter-spacing: 6px; color: #ffd21a; text-shadow: 0 3px 0 #7a2e00, 0 6px 18px rgba(0,0,0,.7); }
+.overlay h1.busted { color: #4a8ae8; }
+.overlay h1.wasted { color: #ff5533; }
+.tagline { font-size: 16px; color: #d8d8d8; margin: 4px 0 14px; }
+#mission-list { text-align: left; font-size: 14px; line-height: 1.7; margin: 0 auto 16px; max-width: 380px; color: #cfcfcf; }
+#mission-list .done { color: #7dff8a; }
+#mission-list .current { color: #ffd21a; font-weight: 700; }
+.buttons { display: flex; gap: 12px; justify-content: center; margin: 10px 0; }
+button { pointer-events: auto; background: #ffd21a; color: #1a1a1a; border: none; border-radius: 6px; padding: 12px 26px; font-size: 17px; font-weight: 800; cursor: pointer; }
+button:hover { background: #ffe14d; }
+.controls { font-size: 13px; color: #bdbdbd; line-height: 1.6; }
+.fine { font-size: 12px; color: #8a8a8a; margin-top: 14px; }
+/* Screenshot staging keeps the title readable over the city. */
+#title-screen.shot-title { background: linear-gradient(160deg, rgba(10,16,38,.45), rgba(60,20,10,.35)); }
