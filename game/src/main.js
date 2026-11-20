@@ -1,23 +1,17 @@
-// Solmar City — boot and the one loop. Input is read every frame, the world
-// advances in fixed 1/60 s steps, missions and the HUD read the world, and the
-// renderer paints what is there. Screens: title, play, paused, help, busted,
-// wasted. Progress (cash, jobs, briefcases) is saved to localStorage.
+// Boot and the one loop: input is read every frame, the world advances in
+// fixed 1/60 s steps, and the renderer paints what is there. Screens: title,
+// help, play, paused, busted, wasted. Progress is saved to localStorage.
 //
 // ?seed=N fixes the city and traffic. ?shot=start|chase|night|end (with
 // &seed=N) stages that scene instead of running the loop, paints it a few
 // times and sets window.__shotReady for a screenshot.
-
-import * as THREE from 'three';
-import { SAVE_KEY, STEP } from './config.js';
+import { STEP, SAVE_KEY, PLAYER } from './config.js';
 import { createRandom } from './random.js';
-import { createWorld } from './world.js';
+import { createGame } from './world.js';
 import { createMissions } from './missions.js';
 import { createHud } from './hud.js';
 import { createAudio } from './audio.js';
-import {
-  ACTION_CAM, ACTION_CONFIRM, ACTION_ENTER, ACTION_MUTE, ACTION_PAUSE,
-  ACTION_RELOAD, ACTION_SHOOT, createInput,
-} from './input.js';
+import { createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_MUTE } from './input.js';
 import { stageShot } from './shots.js';
 
 const MAX_FRAME = 0.25;
@@ -28,13 +22,13 @@ const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
 const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
 
 const canvas = document.getElementById('game');
+const status = document.getElementById('status');
 const audio = createAudio();
-const hud = createHud(document);
-const world = createWorld(THREE, canvas, createRandom(seed), audio, {
-  onMessage: (text) => hud.logMessage(text),
-});
-const missions = createMissions(world, audio, (text) => hud.logMessage(text));
-const input = createInput(canvas);
+const game = createGame(canvas, createRandom(seed), audio);
+game.audio = audio;
+const missions = createMissions(game);
+game.missions = missions;
+const hud = createHud(game);
 
 function readSave() {
   try {
@@ -44,133 +38,84 @@ function readSave() {
     return null;
   }
 }
-function writeSave() {
+
+function saveProgress() {
   try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(world.getSave()));
+    window.localStorage.setItem(SAVE_KEY, JSON.stringify(game.getSave()));
   } catch {
-    // Storage can be off (private windows): progress then lasts this visit only.
+    // Storage can be off (private windows): progress then lasts this visit.
   }
 }
-function clearSave() {
-  try { window.localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
+game.saveProgress = saveProgress;
+
+const save = readSave();
+if (save) {
+  game.applySave(save);
+  missions.jobIndex = Math.min(save.jobsDone || 0, 7);
 }
 
 let screen = 'title';
-let saveTimer = 0;
-let endKind = 'busted';
 
-function refreshTitle() {
-  const save = readSave();
-  hud.setContinueVisible(!!save, save
-    ? `Save found — $${save.cash.toLocaleString('en-US')}, ${save.missionsDone} job${save.missionsDone === 1 ? '' : 's'} done, ${save.collectiblesFound}/10 briefcases.`
-    : '');
+function announce(message) {
+  status.textContent = message;
 }
 
-function newGame() {
-  clearSave();
-  world.reset();
-  missions.start();
-  screen = 'play';
-  audio.ensure(); audio.click();
-  hud.showBanner('SOLMAR CITY', 'Mara is waiting. Follow the yellow beacon.');
-  hud.logMessage('Welcome to Solmar. WASD to move, E to steal a car, F to shoot, P to pause.');
-}
-function continueGame() {
-  const save = readSave();
-  world.reset();
-  if (save) world.applySave(save);
-  missions.start();
-  screen = 'play';
-  audio.ensure(); audio.click();
-  hud.showBanner('WELCOME BACK', 'Mara kept your jobs warm.');
+function showTitle() {
+  screen = 'title';
+  hud.showScreen('title', { hasSave: !!save, save: save || null });
+  announce('Solmar City. Press Enter to start.');
 }
 
-hud.bind({
-  newGame,
-  continueGame,
-  help: () => { screen = 'help'; },
-  backToTitle: () => { screen = 'title'; refreshTitle(); },
-  resume: () => { screen = 'play'; },
-  restartMission: () => { missions.start(); screen = 'play'; },
-  quitToTitle: () => { writeSave(); screen = 'title'; refreshTitle(); },
-  respawn: () => {
-    world.respawn(endKind === 'busted');
-    missions.start();
-    writeSave();
-    screen = 'play';
-  },
-});
-
-function handleWorldEvents() {
-  for (const e of world.takeEvents()) {
-    if (e.type === 'busted' && screen === 'play') {
-      screen = 'busted'; endKind = 'busted';
-      hud.showEnd('busted', 'The cops caught you on foot. 10% of your cash goes to fines and impound fees.');
-      audio.fail();
-    } else if (e.type === 'wasted' && screen === 'play') {
-      screen = 'wasted'; endKind = 'wasted';
-      hud.showEnd('wasted', 'You flatlined. The hospital patched you up — 10% of your cash goes to the bill.');
-      audio.fail();
-    } else if (e.type === 'land') {
-      missions.onWorldEvent(e);
-    } else if (e.type === 'collect') {
-      writeSave();
+function startGame(fresh) {
+  if (fresh) {
+    try {
+      window.localStorage.removeItem(SAVE_KEY);
+    } catch {
+      // Ignore storage errors.
     }
+    game.state.cash = PLAYER.startCash;
+    game.state.jobsDone = 0;
+    game.state.briefcasesFound = 0;
+    game.state.bestStunt = 0;
+    game.state.health = PLAYER.maxHealth;
+    game.setWanted(0);
+    game.player.x = PLAYER.startX;
+    game.player.z = PLAYER.startZ;
+    game.player.angle = Math.PI;
+    game.state.playerY = 0;
+    game.state.onRoof = false;
+    for (const b of game.world.briefcases) {
+      b.found = false;
+      b.mesh.visible = true;
+    }
+    for (const r of game.world.ramps) r.used = false;
+    missions.jobIndex = 0;
   }
-  for (const text of world.takeMessages()) hud.logMessage(text);
+  audio.unlock();
+  screen = 'play';
+  hud.showScreen('none');
+  announce('Playing. Follow Mara\'s job — the yellow beacon marks the target.');
 }
 
-function handleActions() {
-  const actions = input.takeActions();
-  const slot = input.takeWeaponSlot();
-  if (slot >= 0 && slot <= 2 && screen === 'play') {
-    world.player.weapon = slot;
-    audio.click();
-  }
-  if (actions & ACTION_MUTE) hud.setMuted(audio.toggleMute());
-  if (actions & ACTION_CAM && screen === 'play') world.toggleChaseCam();
-  if (actions & ACTION_CONFIRM) {
-    audio.ensure();
-    if (screen === 'title') { if (readSave()) continueGame(); else newGame(); }
-    else if (screen === 'busted' || screen === 'wasted') { world.respawn(endKind === 'busted'); missions.start(); writeSave(); screen = 'play'; }
-    else if (screen === 'paused') screen = 'play';
-  }
-  if (actions & ACTION_PAUSE) {
-    if (screen === 'play') screen = 'paused';
-    else if (screen === 'paused') screen = 'play';
-  }
-  if (screen !== 'play') return;
-  if (actions & ACTION_ENTER) {
-    audio.ensure();
-    if (world.player.boat) world.exitVehicle();
-    else if (world.player.vehicle) world.exitVehicle();
-    else if (!world.enterBoat()) world.enterNearestVehicle();
-  }
-  if (actions & ACTION_SHOOT) world.shoot();
-  if (actions & ACTION_RELOAD) world.reloadWeapon();
-}
-
-function stepGame(dt) {
-  missions.update(dt);
-  world.step(dt, input, input.takeOrbit());
-  // Punch on Space: the input layer reports Space as handbrake/confirm, so
-  // punch uses the held handbrake key while on foot.
-  if (input.held.handbrake && world.player.onFoot) world.punch();
-  handleWorldEvents();
-  saveTimer += dt;
-  if (saveTimer > 5) { saveTimer = 0; writeSave(); }
+function endScreen(kind) {
+  screen = kind;
+  const loss = game.state.lastLoss || 0;
+  hud.showScreen(kind, { loss });
+  announce(kind === 'busted' ? 'Busted by the police.' : 'Wasted.');
 }
 
 function runShot(name) {
-  const shotScreen = stageShot(name, world, missions);
-  screen = shotScreen;
-  refreshTitle();
-  world.refreshCamera();
-  world.resize(window.innerWidth, window.innerHeight);
+  const staged = stageShot(name, game);
+  screen = staged.screen;
+  if (staged.screen === 'title') {
+    hud.showScreen('title', { hasSave: false, save: null });
+  } else {
+    hud.showScreen('none');
+  }
+  hud.update(missions);
   let painted = 0;
   function paint() {
-    world.render();
-    hud.update(world, missions, screen);
+    game.render();
     painted += 1;
     if (painted < 4) requestAnimationFrame(paint);
     else window.__shotReady = true;
@@ -179,41 +124,105 @@ function runShot(name) {
 }
 
 function runGame() {
-  world.resize(window.innerWidth, window.innerHeight);
-  refreshTitle();
-  hud.setMuted(false);
+  const input = createInput(canvas);
   let accumulator = 0;
   let last = performance.now();
+  let lastOver = null;
+
+  // Screen buttons (title / help / pause / busted / wasted).
+  document.getElementById('hud-screen').addEventListener('click', (event) => {
+    const act = event.target && event.target.dataset ? event.target.dataset.act : null;
+    if (!act) return;
+    audio.unlock();
+    if (act === 'start') startGame(true);
+    else if (act === 'continue') startGame(false);
+    else if (act === 'help') {
+      screen = 'help';
+      hud.showScreen('help');
+    } else if (act === 'back') showTitle();
+    else if (act === 'resume') {
+      screen = 'play';
+      hud.showScreen('none');
+    } else if (act === 'quit') showTitle();
+    else if (act === 'respawn') {
+      game.respawn();
+      screen = 'play';
+      hud.showScreen('none');
+    }
+  });
+
+  window.addEventListener('resize', () => game.resize());
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && screen === 'play') {
+      screen = 'pause';
+      hud.showScreen('pause');
+    }
+  });
+
+  function handleActions() {
+    const actions = input.takeActions();
+    if (actions & ACTION_MUTE) {
+      const muted = audio.toggleMute();
+      game.msg(muted ? 'Sound muted.' : 'Sound on.');
+    }
+    if (screen === 'title' || screen === 'help') {
+      if (actions & ACTION_CONFIRM) startGame(screen === 'title' && !!save ? false : true);
+      return actions;
+    }
+    if (screen === 'busted' || screen === 'wasted') {
+      if (actions & ACTION_CONFIRM) {
+        game.respawn();
+        screen = 'play';
+        hud.showScreen('none');
+      }
+      return actions;
+    }
+    if (screen === 'pause') {
+      if (actions & (ACTION_PAUSE | ACTION_CONFIRM)) {
+        screen = 'play';
+        hud.showScreen('none');
+      }
+      return actions;
+    }
+    if (screen === 'play' && (actions & ACTION_PAUSE)) {
+      screen = 'pause';
+      hud.showScreen('pause');
+      return actions;
+    }
+    return actions;
+  }
+
   function frame(now) {
     requestAnimationFrame(frame);
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
-    handleActions();
-    if (screen === 'play') {
-      while (accumulator >= STEP && screen === 'play') {
-        stepGame(STEP);
-        accumulator -= STEP;
-      }
-    } else {
-      accumulator = 0;
-      // The title screen stays alive behind the menu: peds wander, traffic rolls.
-      if (screen === 'title') {
-        world.step(STEP, { moveAxes: () => ({ f: 0, s: 0 }), held: { run: false, handbrake: false }, takeActions: () => 0, takeWeaponSlot: () => -1, takeOrbit: () => ({ dx: 0, dy: 0 }) }, { dx: 0.002, dy: 0 });
+    const actions = handleActions();
+    const paused = screen !== 'play';
+    while (accumulator >= STEP) {
+      const events = game.step(STEP, input, screen === 'play' ? actions : 0, paused);
+      if (screen === 'play') missions.update(STEP, events, actions);
+      accumulator -= STEP;
+      if (game.state.over && game.state.over !== lastOver) {
+        lastOver = game.state.over;
+        saveProgress();
+        endScreen(game.state.over);
       }
     }
-    world.render();
-    hud.update(world, missions, screen);
+    if (screen === 'play' || screen === 'pause' || screen === 'title') {
+      game.render();
+      hud.update(missions);
+    }
   }
-  window.addEventListener('resize', () => world.resize(window.innerWidth, window.innerHeight));
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === 'play') screen = 'paused';
-  });
+
+  showTitle();
   requestAnimationFrame(frame);
 }
 
-// Probing hooks for playtests (and for the ?shot= staging): not part of the game.
-window.__game = { world, missions, audio, input };
-window.__solmar = { version: 'r5', buildings: world.buildingCount };
+// Debug handle for automated playtests (not part of the game UI).
+window.__game = game;
+window.__missions = missions;
+window.__hud = hud;
 
 if (shot) runShot(shot);
 else runGame();

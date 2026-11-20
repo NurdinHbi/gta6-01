@@ -1,106 +1,97 @@
-// The screenshot scenes behind ?shot=start|chase|night|end (with &seed=N).
-// Each one plays the real rules forward from a fresh world for a fixed number
-// of steps, steered by a scripted driver, so the frame is what a short game
-// really looks like and the same seed always gives the same frame. Staged cars
-// are always placed ON a road and pointed along it, so the scripted driver
-// never rams a building: the avenue at x=0 runs the whole city north-south.
-
+// The screenshot scenes behind ?shot=start|chase|night|end. Each one sets the
+// real game to a fixed state (time of day, wanted level, positions, mission),
+// steps the world forward a little so traffic, pedestrians and the sea are
+// alive, and paints the frame — the same seed always gives the same frame.
 import { STEP } from './config.js';
 
-function fakeInput(forward, strafe) {
-  return {
-    moveAxes: () => ({ f: forward, s: strafe || 0 }),
-    held: { forward: forward > 0, back: forward < 0, left: false, right: false, run: false, handbrake: false },
-    takeActions: () => 0,
-    takeWeaponSlot: () => -1,
-    takeOrbit: () => ({ dx: 0, dy: 0 }),
-  };
+function settle(game, seconds) {
+  // Step the world without player input so the scene is alive, not frozen.
+  const idle = { keys: new Set(), takeActions: () => 0, takeDrag: () => ({ dx: 0, dy: 0 }), mouseDown: false, moveAxes: () => ({ x: 0, y: 0 }), run: false, handbrake: false };
+  const steps = Math.floor(seconds / STEP);
+  for (let i = 0; i < steps; i += 1) game.step(STEP, idle, 0, false);
 }
 
-function stepFor(world, seconds, input) {
-  const steps = Math.round(seconds / STEP);
-  for (let i = 0; i < steps; i += 1) world.step(STEP, input, { dx: 0, dy: 0 });
+function paintCarRed(car) {
+  // The staged getaway cars should read clearly at dusk: repaint the body
+  // (each car owns its body material) a bright red.
+  const body = car.mesh.children[0];
+  if (body && body.material && body.material.color) body.material.color.setHex(0xc23b2e);
 }
 
-/** Put a parked car on the x=0 avenue, pointed south, and steal it. */
-function carOnAvenue(world, z) {
-  const car = world.vehicles.find((v) => v.kind === 'parked');
-  if (!car) return null;
-  car.x = 0; car.z = z; car.angle = 0;
-  car.mesh.position.set(0, 0, z);
-  car.mesh.rotation.y = 0;
-  world.player.x = -3; world.player.z = z;
-  world.enterNearestVehicle();
-  return car;
-}
-
-/** Line the pursuing police cars up behind the player's car, then swing the
- * camera to the front-side so the pursuit is actually in frame: a chase
- * camera behind the player would put the police behind the lens. */
-function lineUpPolice(world) {
-  const p = world.player;
-  const veh = p.vehicle;
-  if (!veh) return;
-  const fx = Math.sin(veh.angle); const fz = Math.cos(veh.angle);
-  world.policeCars.forEach((pc, i) => {
-    const back = 15 + i * 9;
-    const side = i % 2 === 0 ? -3 : 3;
-    pc.x = p.x - fx * back - fz * side;
-    pc.z = p.z - fz * back + fx * side;
-    pc.angle = veh.angle;
-    pc.speed = 30;
-    pc.mesh.position.set(pc.x, 0, pc.z);
-    pc.mesh.rotation.y = pc.angle;
-  });
-  // Front-side camera: ahead of the car, looking back at it and the pursuit.
-  world.setCamera(veh.angle + 0.35, 0.3, 18);
-}
-
-/**
- * Set `world` + `missions` to the named scene and return the screen to draw
- * over it. start = title at golden hour on the beachfront, pier and sea ahead;
- * chase = a three-star pursuit down the x=0 avenue at golden hour; night =
- * the casino strip after dark with cops closing in; end = the five-star Big
- * Score getaway at dusk, helicopter up, roadblock ahead.
- */
-export function stageShot(name, world, missions) {
-  world.reset();
-  const idle = fakeInput(0, 0);
+export function stageShot(name, game) {
+  const { state, player, world } = game;
   if (name === 'chase') {
-    world.setTimeOfDay(17.2);
-    missions.start();
-    carOnAvenue(world, -140);
-    world.setWanted(3);
-    stepFor(world, 6, fakeInput(1, 0));
-    lineUpPolice(world);
-    return 'play';
+    // Three-star police chase on the avenue at dusk.
+    state.timeSec = 18.2 * 3600;
+    const car = world.parkedCars[0];
+    game.enterCar(car);
+    paintCarRed(car);
+    car.x = -38;
+    car.z = 40;
+    state.carAngle = Math.PI;
+    car.angle = Math.PI;
+    state.carSpeed = 22;
+    player.x = car.x;
+    player.z = car.z;
+    game.missions.jobIndex = 1;
+    game.missions.beginJob();
+    // Advance past the "steal a car" step (we are already driving) so the
+    // objective bar reads as a chase, then set the three-star tail.
+    game.missions.update(0.05, [], 0);
+    game.setWanted(3);
+    settle(game, 1.5);
+    return { screen: 'play' };
   }
   if (name === 'night') {
-    world.setTimeOfDay(21.6);
-    missions.start();
-    // On the casino plaza, facing the neon sign to the north.
-    world.player.x = 60; world.player.z = 214;
-    world.setWanted(1);
-    stepFor(world, 5, idle);
-    world.setCamera(0, 0.26, 13);
-    return 'play';
+    // Casino strip at night: on foot south of the Grand Solmar, facing its
+    // neon signs, camera low so the signs stay in frame.
+    state.timeSec = 22.4 * 3600;
+    game.setWanted(0);
+    player.x = -57;
+    player.z = 88;
+    player.angle = 0;
+    state.camYaw = Math.PI;
+    // Low camera looking up: the Grand Solmar neon signs (y≈24) stay in frame.
+    state.camPitch = -0.15;
+    state.camDist = 13;
+    game.missions.jobIndex = 4;
+    game.missions.beginJob();
+    settle(game, 1.5);
+    return { screen: 'play' };
   }
   if (name === 'end') {
-    world.setTimeOfDay(18.4);
-    world.state.missionIndex = 7;
-    missions.start();
-    carOnAvenue(world, -60);
-    world.setWanted(5);
-    stepFor(world, 5, fakeInput(1, 0));
-    lineUpPolice(world);
-    return 'play';
+    // Final-job getaway at dusk: five stars, roadblocks ahead. Advance the
+    // Big Score past the vault hold so the objective bar reads as the
+    // getaway through the roadblocks.
+    state.timeSec = 18.7 * 3600;
+    game.missions.jobIndex = 7;
+    game.missions.beginJob();
+    player.x = -60;
+    player.z = 132;
+    game.missions.update(13, [], 0);
+    game.setWanted(5);
+    const car = world.parkedCars[1];
+    game.enterCar(car);
+    paintCarRed(car);
+    car.x = -57;
+    car.z = 100;
+    state.carAngle = Math.PI;
+    car.angle = Math.PI;
+    state.carSpeed = 26;
+    player.x = car.x;
+    player.z = car.z;
+    settle(game, 1.5);
+    return { screen: 'play' };
   }
-  // start (default): on the beachfront promenade, pier and sea ahead, the
-  // tower behind the camera — the title panel sits over the waterfront.
-  world.setTimeOfDay(17.6);
-  missions.start();
-  world.player.x = 0; world.player.z = 234;
-  stepFor(world, 2, idle);
-  world.setCamera(Math.PI, 0.42, 16);
-  return 'title';
+  // Default: start — title screen at golden hour, looking west down the
+  // beachfront toward the sea, the pier and the lighthouse.
+  state.timeSec = 17.6 * 3600;
+  game.setWanted(0);
+  player.x = -150;
+  player.z = 100;
+  player.angle = -Math.PI / 2;
+  state.camYaw = -Math.PI / 2;
+  game.missions.beginJob();
+  settle(game, 1.0);
+  return { screen: 'title' };
 }

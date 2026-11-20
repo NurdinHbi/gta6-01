@@ -1,175 +1,242 @@
-// The HUD: DOM panels, the live 2D minimap, the message feed and the menus.
-// The world owns the simulation; this file only reads it and paints text.
+// HUD: DOM panels (wanted stars, health, cash, clock, speed, objective,
+// message feed) plus a live 2D minimap canvas and the title / help / pause /
+// Busted / Wasted screens.
+import { CITY, WEAPONS, FONT } from './config.js';
 
-import { FONT, WEAPONS } from './config.js';
-
-function fmtClock(hours) {
-  const h = Math.floor(hours) % 24;
-  const m = Math.floor((hours % 1) * 60);
+function fmtClock(timeSec) {
+  const h = Math.floor(timeSec / 3600) % 24;
+  const m = Math.floor((timeSec % 3600) / 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-export function createHud(doc) {
-  const $ = (id) => doc.getElementById(id);
-  const el = {
-    hud: $('hud'), stars: $('stars'), cash: $('cash'), healthFill: $('health-fill'),
-    healthText: $('health-text'), clock: $('clock'), speed: $('speed'), speedBox: $('speed-box'),
-    weapon: $('weapon'), objectiveTitle: $('objective-title'), objectiveBrief: $('objective-brief'),
-    objectiveHint: $('objective-hint'), timer: $('timer'), progressWrap: $('progress-wrap'),
-    progressFill: $('progress-fill'), feed: $('feed'), banner: $('banner'),
-    bannerTitle: $('banner-title'), bannerSub: $('banner-sub'),
-    minimap: $('minimap'), menu: $('menu'), pause: $('pause'), end: $('end'),
-    endTitle: $('end-title'), endText: $('end-text'), endButton: $('end-button'),
-    continueBtn: $('btn-continue'), newBtn: $('btn-new'), helpBtn: $('btn-help'),
-    resumeBtn: $('btn-resume'), restartBtn: $('btn-restart'), quitBtn: $('btn-quit'),
-    help: $('help'), helpClose: $('btn-help-close'), saveNote: $('save-note'),
-    muteNote: $('mute-note'),
-  };
-  const mapCtx = el.minimap.getContext('2d');
-  const feedItems = [];
-  let bannerTimer = null;
+function fmtTimer(sec) {
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
-  function logMessage(text) {
-    feedItems.push(text);
-    while (feedItems.length > 4) feedItems.shift();
-    el.feed.innerHTML = feedItems.map((t) => `<div>${t}</div>`).join('');
-  }
-  function showBanner(title, sub) {
-    el.bannerTitle.textContent = title;
-    el.bannerSub.textContent = sub || '';
-    el.banner.classList.add('show');
-    if (bannerTimer) clearTimeout(bannerTimer);
-    bannerTimer = setTimeout(() => el.banner.classList.remove('show'), 2600);
-  }
+export function createHud(game) {
+  const root = document.getElementById('hud');
+  root.innerHTML = `
+    <div id="hud-top-left">
+      <div id="hud-stars"></div>
+      <div id="hud-health"><div id="hud-health-fill"></div><span id="hud-health-text"></span></div>
+      <div id="hud-cash"></div>
+      <div id="hud-weapon"></div>
+    </div>
+    <div id="hud-top-right">
+      <div id="hud-clock"></div>
+      <div id="hud-speed"></div>
+    </div>
+    <div id="hud-objective"></div>
+    <div id="hud-feed"></div>
+    <div id="hud-crosshair">+</div>
+    <canvas id="hud-minimap" width="220" height="220"></canvas>
+    <div id="hud-screen"></div>
+  `;
+  const starsEl = document.getElementById('hud-stars');
+  const healthFill = document.getElementById('hud-health-fill');
+  const healthText = document.getElementById('hud-health-text');
+  const cashEl = document.getElementById('hud-cash');
+  const weaponEl = document.getElementById('hud-weapon');
+  const clockEl = document.getElementById('hud-clock');
+  const speedEl = document.getElementById('hud-speed');
+  const objectiveEl = document.getElementById('hud-objective');
+  const feedEl = document.getElementById('hud-feed');
+  const crosshair = document.getElementById('hud-crosshair');
+  const minimap = document.getElementById('hud-minimap');
+  const screenEl = document.getElementById('hud-screen');
+  const mm = minimap.getContext('2d');
 
-  function drawMinimap(W) {
-    const ctx = mapCtx;
-    const S = 200;
-    const mx = (x) => ((x + 300) / 600) * S;
-    const my = (z) => ((z + 300) / 680) * S;
-    ctx.clearRect(0, 0, S, S);
-    ctx.fillStyle = '#20242a'; ctx.fillRect(0, 0, S, S);
-    // Sea and sand at the south edge.
-    ctx.fillStyle = '#1d6f8f'; ctx.fillRect(0, my(292), S, S - my(292));
-    ctx.fillStyle = '#e8cf9a'; ctx.fillRect(0, my(250), S, my(292) - my(250));
-    // Roads.
-    ctx.strokeStyle = '#4a4f58'; ctx.lineWidth = 3;
-    for (let v = -240; v <= 240; v += 60) {
-      ctx.beginPath(); ctx.moveTo(mx(v), my(-300)); ctx.lineTo(mx(v), my(250)); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(mx(-300), my(v)); ctx.lineTo(mx(300), my(v)); ctx.stroke();
+  let lastFeed = '';
+
+  function drawMinimap() {
+    const { state, player, world } = game;
+    const S = 220;
+    const scale = S / 460; // world -230..230 maps to the canvas
+    const toX = (x) => (x + 230) * scale;
+    const toY = (z) => (z + 230) * scale;
+    mm.clearRect(0, 0, S, S);
+    mm.fillStyle = '#20242c';
+    mm.fillRect(0, 0, S, S);
+    // Sea (west) and beach.
+    mm.fillStyle = '#1d4e6b';
+    mm.fillRect(0, 0, toX(-190), S);
+    mm.fillStyle = '#c2a878';
+    mm.fillRect(toX(-190), 0, toX(-176) - toX(-190), S);
+    // Streets.
+    mm.strokeStyle = '#4a505c';
+    mm.lineWidth = 5;
+    for (let k = -5; k <= 5; k += 1) {
+      const a = k * 38;
+      mm.beginPath();
+      mm.moveTo(toX(a), 0);
+      mm.lineTo(toX(a), S);
+      mm.stroke();
+      mm.beginPath();
+      mm.moveTo(0, toY(a));
+      mm.lineTo(S, toY(a));
+      mm.stroke();
     }
     // Landmarks.
-    ctx.fillStyle = '#ffd27a';
-    for (const [x, z] of [[-60, -60], [60, 180], [-120, 60], [180, -180], [264, 296], [-216, 300]]) {
-      ctx.beginPath(); ctx.arc(mx(x), my(z), 3, 0, Math.PI * 2); ctx.fill();
+    mm.fillStyle = '#8a7f72';
+    mm.fillRect(toX(8), toY(8), 22 * scale, 22 * scale); // tower
+    mm.fillStyle = '#7a2a4a';
+    mm.fillRect(toX(-70), toY(123), 26 * scale, 20 * scale); // casino
+    mm.fillStyle = '#b8a888';
+    mm.fillRect(toX(47), toY(-27), 20 * scale, 16 * scale); // bank
+    mm.fillStyle = '#5a6e8c';
+    mm.fillRect(toX(-167), toY(-125), 30 * scale, 22 * scale); // stadium
+    // Briefcases not yet found.
+    mm.fillStyle = '#ffd23f';
+    for (const b of world.briefcases) {
+      if (!b.found) {
+        mm.beginPath();
+        mm.arc(toX(b.x), toY(b.z), 2.5, 0, Math.PI * 2);
+        mm.fill();
+      }
     }
-    // Beacon.
-    const m = W.beaconPos;
-    if (m && m.visible) {
-      const pulse = 5 + Math.sin(performance.now() / 200) * 2;
-      ctx.fillStyle = '#ffc93c';
-      ctx.beginPath(); ctx.arc(mx(m.x), my(m.z), pulse, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = '#fff2b0'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(mx(m.x), my(m.z), pulse + 3, 0, Math.PI * 2); ctx.stroke();
+    // Mission beacon.
+    if (state.beacon) {
+      const pulse = 4 + Math.sin(performance.now() / 200) * 1.5;
+      mm.fillStyle = '#ff5d8f';
+      mm.beginPath();
+      mm.arc(toX(state.beacon.x), toY(state.beacon.z), pulse, 0, Math.PI * 2);
+      mm.fill();
+      mm.strokeStyle = '#ffffff';
+      mm.lineWidth = 1;
+      mm.stroke();
+    }
+    // Smuggler boat while chasing.
+    if (game.missions && game.missions.currentObjective() && game.missions.currentObjective().type === 'chase') {
+      mm.fillStyle = '#ff2222';
+      mm.beginPath();
+      mm.arc(toX(world.smugglerBoat.position.x), toY(world.smugglerBoat.position.z), 4, 0, Math.PI * 2);
+      mm.fill();
     }
     // Police.
-    ctx.fillStyle = '#4f8cff';
-    for (const pc of W.policeCars) { ctx.beginPath(); ctx.arc(mx(pc.x), my(pc.z), 3, 0, Math.PI * 2); ctx.fill(); }
-    for (const cop of W.cops) {
-      if (cop.dead) continue;
-      ctx.fillStyle = '#7fa8ff';
-      ctx.beginPath(); ctx.arc(mx(cop.x), my(cop.z), 2.5, 0, Math.PI * 2); ctx.fill();
+    mm.fillStyle = '#2244ff';
+    for (const cop of world.cops) {
+      mm.beginPath();
+      mm.arc(toX(cop.x), toY(cop.z), 3, 0, Math.PI * 2);
+      mm.fill();
     }
-    // Traffic.
-    ctx.fillStyle = '#9a9a9a';
-    for (const v of W.vehicles) {
-      if (v.kind !== 'traffic') continue;
-      ctx.fillRect(mx(v.x) - 1.5, my(v.z) - 1.5, 3, 3);
+    for (const c of world.cruisers) {
+      mm.beginPath();
+      mm.arc(toX(c.x), toY(c.z), 3.5, 0, Math.PI * 2);
+      mm.fill();
     }
-    // Player arrow.
-    const px = mx(W.player.x); const py = my(W.player.z);
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(W.player.angle);
-    ctx.fillStyle = W.player.vehicle || W.player.boat ? '#35e0ff' : '#ff8c2a';
-    ctx.beginPath(); ctx.moveTo(0, -7); ctx.lineTo(5, 6); ctx.lineTo(-5, 6); ctx.closePath(); ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(px, py, 9, 0, Math.PI * 2); ctx.stroke();
+    if (world.heliGroup.visible) {
+      mm.fillStyle = '#ff8800';
+      mm.beginPath();
+      mm.arc(toX(world.heliGroup.position.x), toY(world.heliGroup.position.z), 4, 0, Math.PI * 2);
+      mm.fill();
+    }
+    // Player car / player.
+    if (state.driving && state.car) {
+      mm.fillStyle = '#39ff88';
+      mm.fillRect(toX(state.car.x) - 3, toY(state.car.z) - 3, 6, 6);
+    }
+    const px = toX(player.x);
+    const py = toY(player.z);
+    mm.save();
+    mm.translate(px, py);
+    mm.rotate(Math.atan2(Math.sin(player.angle), Math.cos(player.angle)) + Math.PI);
+    mm.fillStyle = '#ffffff';
+    mm.beginPath();
+    mm.moveTo(0, -7);
+    mm.lineTo(5, 6);
+    mm.lineTo(-5, 6);
+    mm.closePath();
+    mm.fill();
+    mm.restore();
+    mm.strokeStyle = 'rgba(255,255,255,0.35)';
+    mm.lineWidth = 1;
+    mm.strokeRect(0.5, 0.5, S - 1, S - 1);
   }
 
-  function update(W, mission, screen) {
-    const st = W.state;
-    const p = W.player;
-    el.stars.textContent = '★'.repeat(st.wanted) + '☆'.repeat(5 - st.wanted);
-    el.stars.className = st.wanted > 0 ? 'wanted-hot' : '';
-    el.cash.textContent = `$${st.cash.toLocaleString('en-US')}`;
-    el.healthFill.style.width = `${Math.max(0, st.health)}%`;
-    el.healthFill.style.background = st.health > 50 ? '#4fc46a' : st.health > 25 ? '#e8a83a' : '#d82a2a';
-    el.healthText.textContent = `HP ${Math.ceil(st.health)}`;
-    el.clock.textContent = `${fmtClock(st.timeHours)}${st.night ? ' 🌙' : ' ☀️'}`;
-    if (p.vehicle || p.boat) {
-      const spd = p.vehicle ? Math.abs(p.vehicle.speed) : Math.abs(W.playerBoat.speed);
-      el.speedBox.style.display = 'block';
-      el.speed.textContent = `${Math.round(spd * 3.6)} km/h`;
+  function update(missions) {
+    const { state, player } = game;
+    starsEl.textContent = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
+    starsEl.style.color = state.wanted >= 4 ? '#ff3355' : state.wanted >= 2 ? '#ffaa00' : '#ffffff';
+    const hp = Math.max(0, Math.round(state.health));
+    healthFill.style.width = `${hp}%`;
+    healthFill.style.background = hp > 50 ? '#39d353' : hp > 25 ? '#ffaa00' : '#ff3355';
+    healthText.textContent = `HP ${hp}`;
+    cashEl.textContent = `$${Math.floor(state.cash).toLocaleString('en-US')}`;
+    const wp = WEAPONS[state.weaponIndex];
+    weaponEl.textContent = `${wp.name}  ${state.mag[state.weaponIndex]}/${state.reserve[state.weaponIndex]}${state.reloading > 0 ? '  …reloading' : ''}`;
+    clockEl.textContent = fmtClock(state.timeSec);
+    speedEl.textContent = state.driving
+      ? `${Math.round(Math.abs(state.carSpeed) * 3.6)} km/h`
+      : state.inBoat ? `${Math.round(Math.abs(state.boatSpeed) * 3.6)} km/h` : '';
+    objectiveEl.textContent = missions ? missions.objectiveLabel() : '';
+    if (missions) {
+      const t = missions.timerLeft();
+      objectiveEl.textContent += `   ⏱ ${fmtTimer(t)}`;
+      objectiveEl.style.color = t < 30 ? '#ff8080' : '#ffffff';
+    }
+    crosshair.style.display = !state.driving && !state.inBoat ? 'block' : 'none';
+    const feed = state.messages.slice(-3).join('\n');
+    if (feed !== lastFeed) {
+      feedEl.textContent = feed;
+      lastFeed = feed;
+    }
+    drawMinimap();
+  }
+
+  function showScreen(name, data = {}) {
+    if (name === 'title') {
+      screenEl.innerHTML = `
+        <div class="screen-panel">
+          <h1>SOLMAR CITY</h1>
+          <p class="tagline">An original open-world crime story. Eight jobs. One city. No mercy.</p>
+          <p>Mara has work for you. Steal cars, dodge the law, and take the Big Score.</p>
+          <p class="controls">WASD move · Shift run · Mouse drag camera · Space punch · F shoot · E enter car<br>
+          1/2/3 weapons · R reload · P pause · M mute · Enter start</p>
+          ${data.hasSave ? '<button data-act="continue">Continue</button>' : ''}
+          <button data-act="start">${data.hasSave ? 'New Game' : 'Start Game'}</button>
+          <button data-act="help">How to Play</button>
+          <p class="save-line">${data.hasSave ? `Save found: $${Math.floor(data.save.cash).toLocaleString('en-US')} · ${data.save.jobsDone}/8 jobs · ${data.save.briefcasesFound}/10 briefcases` : 'No save yet — progress is stored in this browser.'}</p>
+        </div>`;
+    } else if (name === 'help') {
+      screenEl.innerHTML = `
+        <div class="screen-panel">
+          <h1>HOW TO PLAY</h1>
+          <p>On foot: WASD to move, Shift to run, drag the mouse to look around. Space punches, F (or click) shoots, E gets into a nearby car or boat.</p>
+          <p>Driving: W/S accelerate and brake, A/D steer, Space is the handbrake, E gets out, C changes the camera.</p>
+          <p>Wanted stars rise when you steal, hit pedestrians, shoot in public or drop a cop. Break line of sight and stay quiet to cool off. At 4 stars the helicopter and roadblocks arrive.</p>
+          <p>Follow Mara's jobs in order — each has a beacon, a minimap marker and a timer. Gold briefcases pay $250 each and stunt ramps pay $600 for a clean landing.</p>
+          <p>Busted or Wasted costs you 10% of your cash.</p>
+          <button data-act="back">Back</button>
+        </div>`;
+    } else if (name === 'pause') {
+      screenEl.innerHTML = `
+        <div class="screen-panel">
+          <h1>PAUSED</h1>
+          <p>Solmar City waits for no one — except right now.</p>
+          <button data-act="resume">Resume</button>
+          <button data-act="quit">Quit to Title</button>
+        </div>`;
+    } else if (name === 'busted') {
+      screenEl.innerHTML = `
+        <div class="screen-panel">
+          <h1>BUSTED</h1>
+          <p>The Solmar PD has you. You wake at the precinct, $${Math.floor(data.loss || 0)} lighter.</p>
+          <button data-act="respawn">Wake Up</button>
+        </div>`;
+    } else if (name === 'wasted') {
+      screenEl.innerHTML = `
+        <div class="screen-panel">
+          <h1>WASTED</h1>
+          <p>Solmar City chewed you up. You wake at the hospital, $${Math.floor(data.loss || 0)} lighter.</p>
+          <button data-act="respawn">Wake Up</button>
+        </div>`;
     } else {
-      el.speedBox.style.display = 'none';
+      screenEl.innerHTML = '';
     }
-    const w = WEAPONS[p.weapon];
-    el.weapon.textContent = `${w.name}  ${p.reloading > 0 ? 'RELOADING…' : `${p.ammo[p.weapon]} / ${w.mag}`}   [1/2/3]`;
-    const obj = mission.objectiveText();
-    el.objectiveTitle.textContent = obj.title;
-    el.objectiveBrief.textContent = obj.brief;
-    el.objectiveHint.textContent = obj.hint || '';
-    if (mission.timeLeft > 0 && mission.stage !== 'free') {
-      const t = Math.max(0, Math.ceil(mission.timeLeft));
-      el.timer.textContent = `⏱ ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
-      el.timer.style.color = t < 30 ? '#ff6a5a' : '#ffe9a8';
-    } else {
-      el.timer.textContent = '';
-    }
-    const prog = mission.progress;
-    if (prog > 0) {
-      el.progressWrap.style.display = 'block';
-      el.progressFill.style.width = `${Math.round(prog * 100)}%`;
-    } else {
-      el.progressWrap.style.display = 'none';
-    }
-    drawMinimap({
-      player: p, playerBoat: W.playerBoat, policeCars: W.policeCars, cops: W.cops,
-      vehicles: W.vehicles, beaconPos: W.beaconPos,
-    });
-    el.hud.style.display = screen === 'play' ? 'block' : 'none';
-    el.menu.style.display = screen === 'title' ? 'flex' : 'none';
-    el.pause.style.display = screen === 'paused' ? 'flex' : 'none';
-    el.end.style.display = (screen === 'busted' || screen === 'wasted') ? 'flex' : 'none';
-    el.help.style.display = screen === 'help' ? 'flex' : 'none';
+    screenEl.style.display = name === 'none' ? 'none' : 'flex';
   }
 
-  function showEnd(kind, text) {
-    el.endTitle.textContent = kind === 'busted' ? 'BUSTED' : 'WASTED';
-    el.endTitle.style.color = kind === 'busted' ? '#4f8cff' : '#ff6a5a';
-    el.endText.textContent = text;
-    el.endButton.textContent = 'Continue — respawn';
-  }
-
-  function bind(handlers) {
-    el.newBtn.addEventListener('click', () => handlers.newGame());
-    el.continueBtn.addEventListener('click', () => handlers.continueGame());
-    el.helpBtn.addEventListener('click', () => handlers.help());
-    el.helpClose.addEventListener('click', () => handlers.backToTitle());
-    el.resumeBtn.addEventListener('click', () => handlers.resume());
-    el.restartBtn.addEventListener('click', () => handlers.restartMission());
-    el.quitBtn.addEventListener('click', () => handlers.quitToTitle());
-    el.endButton.addEventListener('click', () => handlers.respawn());
-  }
-
-  return {
-    update, logMessage, showBanner, showEnd, bind,
-    setContinueVisible(visible, note) {
-      el.continueBtn.style.display = visible ? 'block' : 'none';
-      el.saveNote.textContent = note || '';
-    },
-    setMuted(muted) { el.muteNote.textContent = muted ? '🔇 Muted (M)' : '🔊 Sound on (M)'; },
-  };
+  return { update, showScreen, root };
 }

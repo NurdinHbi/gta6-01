@@ -1,232 +1,238 @@
-// Mara's jobs: the eight-mission state machine. Each mission type is a small
-// stage machine (go there, steal then drive, hold the zone, chase the boat,
-// clear the jump, grab then escape). The world owns positions and police; this
-// file owns timers, stages, payouts and the beacon. main.js routes world
-// events here (landings, steals) and asks for the current objective each frame.
+// Mara's eight jobs: a small state machine that walks each job's objectives
+// in order. The world owns the simulation; this module reads the world state,
+// sets beacons and wanted levels, pays out on completion and restarts a job
+// when its timer runs out.
+import { JOBS, BRIEFCASE_REWARD, STUNT_REWARD } from './config.js';
+import { ACTION_ENTER } from './input.js';
 
-import { LANDMARKS, MISSIONS } from './config.js';
+function dist2d(ax, az, bx, bz) {
+  const dx = ax - bx;
+  const dz = az - bz;
+  return Math.sqrt(dx * dx + dz * dz);
+}
 
-function dist2(ax, az, bx, bz) { const dx = ax - bx; const dz = az - bz; return dx * dx + dz * dz; }
+export function createMissions(game) {
+  const { state, player, world } = game;
+  let jobIndex = 0; // 0-based into JOBS
+  let objIndex = 0;
+  let timer = 0;
+  let holdTime = 0;
+  let started = false;
+  let objectiveStarted = false;
 
-export function createMissions(world, audio, say) {
-  const W = world;
-  let stage = 'idle';
-  let timeLeft = 0;
-  let holdProgress = 0;
-  let chaseProgress = 0;
-  let lastObjective = '';
-
-  function current() {
-    return W.state.missionIndex < MISSIONS.length ? MISSIONS[W.state.missionIndex] : null;
+  function currentJob() {
+    return JOBS[jobIndex] || null;
   }
-  function isDone() { return W.state.missionIndex >= MISSIONS.length; }
 
-  function start() {
-    const m = current();
-    if (!m) {
-      W.state.freeRoam = true;
-      W.setBeacon(0, 0, false);
-      W.setZone(0, 0, false);
-      W.setLandZone(0, 0, false);
-      stage = 'free';
+  function currentObjective() {
+    const job = currentJob();
+    return job ? job.objectives[objIndex] : null;
+  }
+
+  function setObjectiveBeacon(obj) {
+    if (!obj) {
+      game.clearBeacon();
       return;
     }
-    stage = m.type === 'steal' ? 'steal' : m.type === 'boat' ? 'toDock' : m.type === 'stunt' ? 'drive' : m.type === 'escape' ? 'grab' : 'toTarget';
-    timeLeft = m.timeLimit;
-    holdProgress = 0;
-    chaseProgress = 0;
-    if (m.forceNight) W.setTimeOfDay(21.5);
-    if (m.type === 'stunt') {
-      W.setLandZone(m.landZone.x, m.landZone.z, true);
-      W.landZoneActive = true;
-      W.landZonePos = { x: m.landZone.x, z: m.landZone.z };
-    } else {
-      W.setLandZone(0, 0, false);
-      W.landZoneActive = false;
-    }
-    if (m.type === 'boat') {
-      W.targetBoat.active = false;
-      W.targetBoat.mesh.visible = false;
-    }
-    updateBeacon();
-    say(`Mara — Job ${m.id}: ${m.title}. ${m.brief}`);
-    audio.jingle();
-  }
-
-  function updateBeacon() {
-    const m = current();
-    if (!m) { W.setBeacon(0, 0, false); return; }
-    if (stage === 'steal') { W.setBeacon(0, 0, false); return; }
-    if (stage === 'toDock') W.setBeacon(m.target.x, m.target.z, true);
-    else if (stage === 'chase') W.setBeacon(W.targetBoat.x, W.targetBoat.z, true);
-    else if (stage === 'drive' && m.type === 'stunt') W.setBeacon(m.target.x, m.target.z, true);
-    else if (stage === 'escape') W.setBeacon(m.escape.x, m.escape.z, true);
-    else W.setBeacon(m.target.x, m.target.z, true);
-  }
-
-  function objectiveText() {
-    const m = current();
-    if (!m) return { title: 'Free Roam', brief: 'All eight jobs done. Solmar is yours — collect briefcases, hit the ramps, or just drive.', hint: '', progress: 0 };
-    let brief = m.brief;
-    let progress = 0;
-    if (stage === 'steal') brief = 'Steal a parked car — walk up to one and press E.';
-    else if (stage === 'hold') { brief = 'Hold the zone — stay inside the glowing circle!'; progress = holdProgress / m.holdSeconds; }
-    else if (stage === 'chase') { brief = 'Stay on the smuggler’s boat!'; progress = chaseProgress / m.chaseSeconds; }
-    else if (stage === 'escape') brief = 'Escape to the beacon — lose the heat on the way.';
-    else if (stage === 'toDock') brief = 'Get to the marina dock and board the speedboat (E).';
-    else if (stage === 'drive' && m.type === 'stunt') brief = 'Steal a car and hit the pier ramp at full speed.';
-    else if (stage === 'grab') brief = 'Grab the briefcase on the tower terrace.';
-    return { title: `Job ${m.id}: ${m.title}`, brief, hint: m.hint, progress, timeLeft };
-  }
-
-  function complete() {
-    const m = current();
-    if (!m) return;
-    W.state.cash += m.pay;
-    W.state.missionsDone += 1;
-    W.state.missionIndex += 1;
-    W.setBeacon(0, 0, false);
-    W.setZone(0, 0, false);
-    W.setLandZone(0, 0, false);
-    W.landZoneActive = false;
-    W.targetBoat.active = false;
-    W.targetBoat.mesh.visible = false;
-    say(`Job done — ${m.title}. Mara paid $${m.pay}.`);
-    audio.jingle();
-    if (W.state.missionIndex >= MISSIONS.length) {
-      W.state.freeRoam = true;
-      W.state.cash += 2000;
-      say('All eight jobs done. Mara wired a $2,000 bonus — free roam unlocked.');
-      stage = 'free';
-    } else {
-      start();
-    }
-  }
-
-  function fail(reason) {
-    const m = current();
-    if (!m) return;
-    say(`${reason} Mara gives you another shot at ${m.title}.`);
-    audio.fail();
-    W.setZone(0, 0, false);
-    if (m.type === 'boat') { W.targetBoat.active = false; W.targetBoat.mesh.visible = false; }
-    start();
-  }
-
-  function update(dt) {
-    const m = current();
-    if (!m || stage === 'free' || stage === 'idle') return;
-    timeLeft -= dt;
-    if (timeLeft <= 0) { fail('Time’s up.'); return; }
-    const p = W.player;
-    if (stage === 'steal') {
-      if (p.vehicle) {
-        stage = 'drive';
-        if (W.state.wanted < 2) W.setWanted(2);
-        say('Now drive it to the hideout — and lose the tail.');
-        updateBeacon();
-      }
+    if (obj.type === 'chase') {
+      // The smuggler boat moves; its marker is drawn live on the minimap.
+      game.clearBeacon();
       return;
     }
-    if (stage === 'drive') {
-      if (m.type === 'stunt') {
-        if (p.vehicle && dist2(p.x, p.z, m.target.x, m.target.z) < 100) {
-          // The ramp is the target; the landing itself completes it (see onWorldEvent).
+    if (obj.type === 'enterCar' || obj.type === 'loseHeat' || obj.type === 'enterBoat') {
+      game.clearBeacon();
+      return;
+    }
+    game.setBeacon(obj.x, obj.y || 0, obj.z, obj.type === 'pickup' ? 0xffd23f : 0x00e5ff);
+  }
+
+  function beginObjective() {
+    const obj = currentObjective();
+    objectiveStarted = true;
+    holdTime = 0;
+    setObjectiveBeacon(obj);
+    if (!obj) return;
+    if (obj.type === 'hold' && obj.wanted) game.setWanted(obj.wanted);
+    if (obj.type === 'goto' && obj.wanted) game.setWanted(obj.wanted);
+    if (obj.type === 'lift') game.state.liftPadActive = true;
+    if (obj.type === 'pickup' && currentJob().id === 7) game.setWanted(4);
+    if (obj.type === 'jump') game.msg('Hit the ramp at full speed — over 60 km/h!');
+    if (obj.type === 'chase') game.msg('The smuggler is running for open water. Catch him!');
+  }
+
+  function beginJob() {
+    const job = currentJob();
+    if (!job) return;
+    objIndex = 0;
+    timer = job.timeLimit;
+    started = true;
+    objectiveStarted = false;
+    game.msg(`JOB ${job.id}/8 — ${job.name}: ${job.intro}`);
+    if (job.id === 5) {
+      // Night Run happens after dark.
+      game.state.timeSec = 21.5 * 3600;
+      game.msg('Night falls over Solmar City.');
+    }
+    beginObjective();
+  }
+
+  function completeObjective() {
+    const job = currentJob();
+    objIndex += 1;
+    objectiveStarted = false;
+    game.state.liftPadActive = false;
+    if (objIndex >= job.objectives.length) completeJob();
+    else beginObjective();
+  }
+
+  function completeJob() {
+    const job = currentJob();
+    game.addCash(job.payout);
+    game.state.jobsDone += 1;
+    game.msg(`${job.done}`);
+    game.audio.jingle();
+    game.clearBeacon();
+    jobIndex += 1;
+    if (jobIndex >= JOBS.length) {
+      game.state.freeRoam = true;
+      game.addCash(5000);
+      game.msg('ALL EIGHT JOBS DONE — free roam unlocked. Bonus +$5,000. Solmar City is yours.');
+      game.saveProgress();
+      return;
+    }
+    beginJob();
+    game.saveProgress();
+  }
+
+  function failJob() {
+    const job = currentJob();
+    game.msg(`Time ran out on ${job.name}. Mara gives you another shot — the job restarts.`);
+    game.setWanted(0);
+    beginJob();
+  }
+
+  function update(dt, events, actions) {
+    const job = currentJob();
+    if (!job) return; // all jobs done: free roam
+    if (!started) {
+      beginJob();
+      return;
+    }
+    timer -= dt;
+    if (timer <= 0) {
+      failJob();
+      return;
+    }
+    const obj = currentObjective();
+    if (!obj) return;
+    const px = player.x;
+    const pz = player.z;
+    const py = game.state.playerY || 0;
+
+    // Stunt ramps pay $600 for a clean landing even outside the job.
+    for (const e of events) {
+      if (e.type === 'jumpLand' && e.speed > 17 && e.airTime > 0.7) {
+        const r = game.world.ramps.find((ramp) => dist2d(e.x, e.z, ramp.x, ramp.z) < 60);
+        if (r && !r.used) {
+          r.used = true;
+          game.addCash(STUNT_REWARD);
+          game.msg(`Stunt ramp cleared! +$${STUNT_REWARD}`);
+          game.audio.pickup();
         }
-        return;
+        if (obj.type === 'jump') completeObjective();
       }
-      if (dist2(p.x, p.z, m.target.x, m.target.z) < 36) complete();
-      return;
+      if (e.type === 'liftUp' && obj.type === 'lift') completeObjective();
+      if (e.type === 'boatBoard' && obj.type === 'enterBoat') completeObjective();
     }
-    if (stage === 'toDock') {
-      if (p.boat) {
-        stage = 'chase';
-        W.targetBoat.active = true;
-        W.targetBoat.mesh.visible = true;
-        W.targetBoat.pathT = 0;
-        say('There he is — the red boat. Stay on him!');
-        updateBeacon();
-      }
-      return;
-    }
-    if (stage === 'chase') {
-      updateBeacon();
-      const d = Math.hypot(p.x - W.targetBoat.x, p.z - W.targetBoat.z);
-      if (d < 20) {
-        chaseProgress += dt;
-        if (chaseProgress >= m.chaseSeconds) complete();
-      } else {
-        chaseProgress = Math.max(0, chaseProgress - dt * 0.5);
-      }
-      return;
-    }
-    if (stage === 'toTarget') {
-      if (m.type === 'hold') {
-        W.setZone(m.target.x, m.target.z, true);
-        if (dist2(p.x, p.z, m.target.x, m.target.z) < 36) {
-          stage = 'hold';
-          holdProgress = 0;
-          if (m.wantedOnHold) W.setWanted(m.wantedOnHold);
-          else W.setWanted(3);
-          say('Hold it — stay in the zone!');
+
+    switch (obj.type) {
+      case 'pickup': {
+        const dy = Math.abs((obj.y || 0) - py);
+        if (dist2d(px, pz, obj.x, obj.z) < obj.radius && dy < 5) {
+          game.audio.pickup();
+          completeObjective();
         }
-        return;
+        break;
       }
-      if (dist2(p.x, p.z, m.target.x, m.target.z) < 36) complete();
-      return;
-    }
-    if (stage === 'hold') {
-      if (dist2(p.x, p.z, m.target.x, m.target.z) < 36) {
-        holdProgress += dt;
-        if (holdProgress >= m.holdSeconds) {
-          stage = 'escape';
-          W.setZone(0, 0, false);
-          say('Got it — now run!');
-          updateBeacon();
+      case 'goto': {
+        if (dist2d(px, pz, obj.x, obj.z) < obj.radius) completeObjective();
+        break;
+      }
+      case 'enterCar': {
+        if (game.state.driving) {
+          completeObjective();
+          game.setWanted(2);
+          game.msg('Two stars on you — lose the tail, then get to the hideout.');
         }
-      } else {
-        holdProgress = Math.max(0, holdProgress - dt);
+        break;
       }
-      return;
-    }
-    if (stage === 'grab') {
-      if (dist2(p.x, p.z, m.target.x, m.target.z) < 25) {
-        stage = 'escape';
-        if (m.wantedOnGrab) W.setWanted(m.wantedOnGrab);
-        say('Briefcase grabbed — four stars and a helicopter. Move!');
-        updateBeacon();
+      case 'loseHeat': {
+        if (game.state.wanted <= 0) completeObjective();
+        break;
       }
-      return;
-    }
-    if (stage === 'escape') {
-      if (dist2(p.x, p.z, m.escape.x, m.escape.z) < 36) complete();
+      case 'hold': {
+        if (dist2d(px, pz, obj.x, obj.z) < obj.radius) {
+          holdTime += dt;
+          if (holdTime >= (obj.hold || 8)) completeObjective();
+        } else holdTime = 0;
+        break;
+      }
+      case 'enterBoat': {
+        // Completed via the boatBoard event above.
+        break;
+      }
+      case 'chase': {
+        if (game.state.inBoat && (game.state.smugglerDist || 999) < obj.radius) {
+          game.msg('You ran the smuggler down!');
+          completeObjective();
+        }
+        break;
+      }
+      case 'jump': {
+        // Completed via the jumpLand event above.
+        break;
+      }
+      case 'lift': {
+        // Completed via the liftUp event above.
+        break;
+      }
+      default:
+        break;
     }
   }
 
-  function onWorldEvent(e) {
-    const m = current();
-    if (!m) return;
-    if (e.type === 'land' && m.type === 'stunt' && stage === 'drive') {
-      if (e.inZone) complete();
-      else say('Jump landed outside the zone — hit the ramp again.');
+  function objectiveLabel() {
+    const job = currentJob();
+    if (!job) return 'Free roam — Solmar City is yours.';
+    const obj = currentObjective();
+    let label = `Job ${job.id}/8 — ${job.name}: ${obj ? obj.label : ''}`;
+    if (obj && obj.type === 'hold') {
+      label += ` (${Math.max(0, obj.hold - holdTime).toFixed(0)}s)`;
     }
+    return label;
   }
 
-  function resetTo(index) {
-    W.state.missionIndex = index;
-    start();
+  function timerLeft() {
+    return Math.max(0, timer);
   }
 
   return {
-    current, isDone, start, update, onWorldEvent, objectiveText, complete, fail, resetTo,
-    get stage() { return stage; },
-    get timeLeft() { return timeLeft; },
-    get progress() {
-      const m = current();
-      if (!m) return 0;
-      if (stage === 'hold') return holdProgress / m.holdSeconds;
-      if (stage === 'chase') return chaseProgress / m.chaseSeconds;
-      return 0;
+    update,
+    objectiveLabel,
+    timerLeft,
+    currentJob,
+    currentObjective,
+    get jobIndex() {
+      return jobIndex;
+    },
+    set jobIndex(v) {
+      jobIndex = v;
+      started = false;
+      objectiveStarted = false;
+    },
+    beginJob,
+    get started() {
+      return started;
     },
   };
 }

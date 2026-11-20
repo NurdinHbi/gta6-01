@@ -1,101 +1,130 @@
-// Keyboard and pointer input. Held keys give movement and driving; one-shot
-// presses (enter car, shoot, reload, pause, weapon switch, mute) are queued as
-// bit flags and taken once by the loop, so a press between two frames is never
-// lost and never counted twice. Dragging the mouse orbits the camera.
+// Keyboard and mouse input. Keys are tracked as a live set; discrete presses
+// (confirm, pause, enter-car, reload, weapon switch, mute, camera) are queued
+// as one-shot actions the loop consumes once per frame. Dragging the mouse
+// orbits the camera; the arrow keys do the same.
+export const ACTION_CONFIRM = 1 << 0;
+export const ACTION_PAUSE = 1 << 1;
+export const ACTION_ENTER = 1 << 2;
+export const ACTION_RELOAD = 1 << 3;
+export const ACTION_MUTE = 1 << 4;
+export const ACTION_CAMERA = 1 << 5;
+export const ACTION_SHOOT = 1 << 6;
+export const ACTION_PUNCH = 1 << 7;
+export const ACTION_WEAPON_1 = 1 << 8;
+export const ACTION_WEAPON_2 = 1 << 9;
+export const ACTION_WEAPON_3 = 1 << 10;
 
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
-export const ACTION_ENTER = 4;
-export const ACTION_SHOOT = 8;
-export const ACTION_RELOAD = 16;
-export const ACTION_MUTE = 32;
-export const ACTION_CAM = 64;
-
-const MOVE = {
-  KeyW: 'forward', ArrowUp: 'forward',
-  KeyS: 'back', ArrowDown: 'back',
-  KeyA: 'left', KeyD: 'right',
+const KEY_ACTIONS = {
+  Enter: ACTION_CONFIRM,
+  KeyP: ACTION_PAUSE,
+  Escape: ACTION_PAUSE,
+  KeyE: ACTION_ENTER,
+  KeyR: ACTION_RELOAD,
+  KeyM: ACTION_MUTE,
+  KeyC: ACTION_CAMERA,
+  Digit1: ACTION_WEAPON_1,
+  Digit2: ACTION_WEAPON_2,
+  Digit3: ACTION_WEAPON_3,
 };
 
 export function createInput(canvas) {
-  const held = { forward: false, back: false, left: false, right: false, run: false, handbrake: false };
-  let actions = 0;
-  let weaponSlot = -1;
-  let orbitDX = 0;
-  let orbitDY = 0;
+  const keys = new Set();
+  let queued = 0;
+  let dragDX = 0;
+  let dragDY = 0;
   let dragging = false;
   let lastX = 0;
   let lastY = 0;
+  let mouseDown = false;
 
-  window.addEventListener('keydown', (event) => {
-    const move = MOVE[event.code];
-    if (move) {
-      held[move] = true;
-      event.preventDefault();
+  function onKeyDown(event) {
+    if (event.repeat) {
+      if (event.code === 'Space') event.preventDefault();
       return;
     }
-    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') { held.run = true; return; }
-    if (event.code === 'Space') { held.handbrake = true; event.preventDefault(); return; }
-    if (event.repeat) return;
-    if (event.code === 'Enter' || event.code === 'Space') actions |= ACTION_CONFIRM;
-    else if (event.code === 'KeyP' || event.code === 'Escape') actions |= ACTION_PAUSE;
-    else if (event.code === 'KeyE') actions |= ACTION_ENTER;
-    else if (event.code === 'KeyF') actions |= ACTION_SHOOT;
-    else if (event.code === 'KeyR') actions |= ACTION_RELOAD;
-    else if (event.code === 'KeyM') actions |= ACTION_MUTE;
-    else if (event.code === 'KeyC') actions |= ACTION_CAM;
-    else if (event.code === 'Digit1') weaponSlot = 0;
-    else if (event.code === 'Digit2') weaponSlot = 1;
-    else if (event.code === 'Digit3') weaponSlot = 2;
-  });
-  window.addEventListener('keyup', (event) => {
-    const move = MOVE[event.code];
-    if (move) held[move] = false;
-    if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') held.run = false;
-    if (event.code === 'Space') held.handbrake = false;
-  });
-  window.addEventListener('blur', () => {
-    for (const k of Object.keys(held)) held[k] = false;
-  });
-  canvas.addEventListener('pointerdown', (event) => {
+    keys.add(event.code);
+    const action = KEY_ACTIONS[event.code];
+    if (action) queued |= action;
+    if (event.code === 'Space') {
+      queued |= ACTION_PUNCH;
+      event.preventDefault();
+    }
+    if (event.code === 'KeyF') queued |= ACTION_SHOOT;
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
+  }
+
+  function onKeyUp(event) {
+    keys.delete(event.code);
+  }
+
+  function onPointerDown(event) {
     dragging = true;
+    mouseDown = true;
     lastX = event.clientX;
     lastY = event.clientY;
-    actions |= ACTION_SHOOT;
-  });
-  window.addEventListener('pointermove', (event) => {
+    if (event.button === 0) queued |= ACTION_SHOOT;
+  }
+
+  function onPointerMove(event) {
     if (!dragging) return;
-    orbitDX += event.clientX - lastX;
-    orbitDY += event.clientY - lastY;
+    dragDX += event.clientX - lastX;
+    dragDY += event.clientY - lastY;
     lastX = event.clientX;
     lastY = event.clientY;
-  });
-  window.addEventListener('pointerup', () => { dragging = false; });
+  }
+
+  function onPointerUp() {
+    dragging = false;
+    mouseDown = false;
+  }
+
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  canvas.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
   return {
-    held,
+    keys,
     takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
-    },
-    takeWeaponSlot() {
-      const slot = weaponSlot;
-      weaponSlot = -1;
-      return slot;
-    },
-    takeOrbit() {
-      const out = { dx: orbitDX, dy: orbitDY };
-      orbitDX = 0;
-      orbitDY = 0;
+      const out = queued;
+      queued = 0;
       return out;
     },
-    /** -1/0/1 forward and strafe, from the held keys. */
+    takeDrag() {
+      const out = { dx: dragDX, dy: dragDY };
+      dragDX = 0;
+      dragDY = 0;
+      return out;
+    },
+    get mouseDown() {
+      return mouseDown;
+    },
+    // -1..1 movement axes from WASD (x = strafe, y = forward).
     moveAxes() {
-      return {
-        f: (held.forward ? 1 : 0) - (held.back ? 1 : 0),
-        s: (held.right ? 1 : 0) - (held.left ? 1 : 0),
-      };
+      let x = 0;
+      let y = 0;
+      if (keys.has('KeyA')) x -= 1;
+      if (keys.has('KeyD')) x += 1;
+      if (keys.has('KeyW') || keys.has('ArrowUp')) y += 1;
+      if (keys.has('KeyS') || keys.has('ArrowDown')) y -= 1;
+      if (keys.has('ArrowLeft')) x -= 1;
+      if (keys.has('ArrowRight')) x += 1;
+      return { x, y };
+    },
+    get run() {
+      return keys.has('ShiftLeft') || keys.has('ShiftRight');
+    },
+    get handbrake() {
+      return keys.has('Space');
+    },
+    destroy() {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      canvas.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
     },
   };
 }

@@ -1,171 +1,148 @@
-// Solmar City — every tuning number, landmark and job in one place.
-// The city is a flat grid in world units: x east, z south. Roads run every
-// 60 units; the beach and the sea are the south edge (z past 250).
-
+// Every tuning number, weapon, job and colour in one place. The city is a
+// 10x10 block grid; one block pitch is BLOCK + ROAD wide.
 export const STEP = 1 / 60;
-export const SAVE_KEY = 'solmar-city.save.v1';
-export const WORLD = { half: 300, beachZ: 250, seaZ: 292, roadStep: 60 };
+
+export const CITY = {
+  blocks: 10,
+  block: 26,
+  road: 12,
+  half: 190, // city spans about -190..190; the sea starts west of -190
+  seaX: -190,
+  beachX: -176,
+};
+
+export const DAY = 24 * 3600; // seconds in a full day/night cycle
+export const DAY_LENGTH = 480; // real seconds per game day
 
 export const PLAYER = {
   walkSpeed: 7,
   runSpeed: 12,
-  radius: 0.9,
-  health: 100,
-  punchDamage: 25,
-  punchRange: 2.4,
+  radius: 0.7,
+  maxHealth: 100,
+  punchRange: 2.2,
+  punchDamage: 12,
   punchCooldown: 0.45,
+  startCash: 250,
+  startX: 24,
+  startZ: 120,
 };
 
 export const WEAPONS = [
-  { name: 'Pistol', key: '1', damage: 34, range: 55, rate: 0.28, spread: 0.012, mag: 12, reload: 1.1, auto: false, kick: 0.35, color: 0x2b2f36 },
-  { name: 'SMG', key: '2', damage: 16, range: 42, rate: 0.09, spread: 0.05, mag: 32, reload: 1.4, auto: true, kick: 0.22, color: 0x3a3f4a },
-  { name: 'Shotgun', key: '3', damage: 14, range: 26, rate: 0.85, spread: 0.11, mag: 6, reload: 1.8, auto: false, pellets: 7, kick: 0.9, color: 0x6b4a2a },
+  { name: 'Pistol', damage: 34, range: 55, rate: 0.28, spread: 0.012, mag: 12, reload: 1.1, auto: false, ammo: 48 },
+  { name: 'SMG', damage: 16, range: 34, rate: 0.085, spread: 0.05, mag: 32, reload: 1.4, auto: true, ammo: 128 },
+  { name: 'Shotgun', damage: 16, range: 22, rate: 0.85, spread: 0.11, mag: 6, reload: 2.0, auto: false, pellets: 7, ammo: 24 },
 ];
 
-export const CAR = {
-  accel: 22,
-  brake: 34,
-  reverseMax: 12,
-  maxSpeed: 46,
-  steer: 0.55,
-  grip: 6.5,
-  radius: 2.2,
-  enterRange: 4.5,
-};
-
 export const WANTED = {
-  stealCar: 1,
-  hitPedestrian: 1,
+  decayQuiet: 0.045, // stars per second while unseen and quiet
+  decaySeen: 0.0,
+  steal: 1,
+  hitPed: 1,
   shootPublic: 1,
-  killCop: 2,
-  killPedestrian: 1,
-  decaySeconds: 26,
+  copDown: 2,
   max: 5,
 };
 
+export const TRAFFIC_CARS = 10;
+export const PARKED_CARS = 13;
+export const PEDESTRIANS = 24;
+export const BRIEFCASES = 10;
+export const STUNT_RAMPS = 3;
+
+export const BRIEFCASE_REWARD = 250;
+export const STUNT_REWARD = 600;
+export const BUSTED_LOSS = 0.1; // fraction of cash lost on Busted / Wasted
+
+// Mara's eight jobs, in order. Each objective is one step of the job; the
+// state machine in missions.js walks them in order.
+export const JOBS = [
+  {
+    id: 1, name: 'First Errand', payout: 500, timeLimit: 150,
+    intro: "Mara: pick up my package on the pier before the timer runs out. Don't keep me waiting.",
+    done: 'Package delivered. Mara trusts you now. +$500',
+    objectives: [{ type: 'pickup', label: 'Pick up the package on the pier', x: -196, z: 62, radius: 3.5 }],
+  },
+  {
+    id: 2, name: 'Getaway Driver', payout: 800, timeLimit: 240,
+    intro: 'Mara: steal a car, then lose the tail and bring it to the hideout.',
+    done: 'Clean getaway. The hideout crew is impressed. +$800',
+    objectives: [
+      { type: 'enterCar', label: 'Steal a car (walk up and press E)', radius: 4 },
+      { type: 'loseHeat', label: 'Lose the tail (break line of sight)', wanted: 2 },
+      { type: 'goto', label: 'Drive to the hideout', x: 150, z: -150, radius: 7 },
+    ],
+  },
+  {
+    id: 3, name: 'Bank Job', payout: 2000, timeLimit: 300,
+    intro: 'Mara: hold the lobby of the First Solmar Bank, then run to the safe house.',
+    done: 'The bank job paid off. +$2,000',
+    objectives: [
+      { type: 'hold', label: 'Hold the bank lobby', x: 60, z: -24, radius: 9, hold: 10 },
+      { type: 'goto', label: 'Escape the three-star response to the safe house', x: -120, z: 150, radius: 8, wanted: 3 },
+    ],
+  },
+  {
+    id: 4, name: 'Boat Chase', payout: 1500, timeLimit: 240,
+    intro: 'Mara: take a speedboat from the marina and run down the smuggler off the coast.',
+    done: 'Smuggler caught, cargo seized. +$1,500',
+    objectives: [
+      { type: 'enterBoat', label: 'Board the speedboat at the marina', x: -200, z: -40, radius: 5 },
+      { type: 'chase', label: 'Run down the smuggler boat', radius: 14 },
+    ],
+  },
+  {
+    id: 5, name: 'Night Run', payout: 1200, timeLimit: 300,
+    intro: 'Mara: a cross-city delivery after dark. Keep it quiet.',
+    done: 'Night delivery made, no questions asked. +$1,200',
+    objectives: [
+      { type: 'pickup', label: 'Collect the night parcel at the stadium', x: -150, z: -120, radius: 4 },
+      { type: 'goto', label: 'Deliver it to the north docks', x: 24, z: -168, radius: 7 },
+    ],
+  },
+  {
+    id: 6, name: 'Stunt Jump', payout: 1000, timeLimit: 180,
+    intro: 'Mara: clear the broken pier ramp and land it clean for the cameras.',
+    done: 'The cameras loved it. +$1,000',
+    objectives: [{ type: 'jump', label: 'Hit the pier ramp at speed and land the jump', x: -196, z: 96, radius: 10 }],
+  },
+  {
+    id: 7, name: 'Rooftop Heist', payout: 3000, timeLimit: 300,
+    intro: 'Mara: grab the briefcase on the Solmar Tower roof while the helicopter hunts you.',
+    done: 'Rooftop briefcase secured. +$3,000',
+    objectives: [
+      { type: 'lift', label: 'Take the lift up Solmar Tower (stand on the pad, press E)', x: 12, z: 12, radius: 4 },
+      { type: 'pickup', label: 'Grab the briefcase on the roof', x: 12, z: 12, y: 96, radius: 4 },
+      { type: 'goto', label: 'Get back down and reach the hideout', x: 150, z: -150, radius: 8, wanted: 4 },
+    ],
+  },
+  {
+    id: 8, name: 'The Big Score', payout: 10000, timeLimit: 420,
+    intro: 'Mara: hit the Grand Solmar vault and bring the money home through the roadblocks.',
+    done: 'The Big Score is yours. Solmar City is your playground now. +$10,000',
+    objectives: [
+      { type: 'hold', label: 'Crack the Grand Solmar vault', x: -60, z: 132, radius: 9, hold: 12 },
+      { type: 'goto', label: 'Bring the money home through the roadblocks', x: 150, z: -150, radius: 8, wanted: 5 },
+    ],
+  },
+];
+
 export const PALETTE = {
-  skyDawn: 0xff9a6b,
-  skyNoon: 0x7ec8f2,
-  skyGolden: 0xffb347,
-  skyDusk: 0x3a2b5e,
+  skyDawn: 0xff9a7a,
+  skyNoon: 0x87b5e0,
+  skyDusk: 0xff8c4a,
   skyNight: 0x0b1026,
   sunNoon: 0xfff2d8,
-  sunGolden: 0xff9a3c,
-  moon: 0x8fa8ff,
-  road: 0x2e3138,
-  roadLine: 0xd8d8c8,
-  sidewalk: 0x8d8d84,
-  sand: 0xe8cf9a,
-  sea: 0x1d6f8f,
-  seaDeep: 0x0d4a68,
-  grass: 0x4f8f4a,
-  building: [0xb8a88f, 0x9fb4c4, 0xc4a484, 0x8fa3b8, 0xd8c8a8, 0xa8b8a8, 0xc4b49a, 0x7f9fb8],
-  windowLit: 0xffd27a,
-  windowDark: 0x2a3542,
-  neonPink: 0xff4fa3,
-  neonCyan: 0x35e0ff,
-  neonGold: 0xffc93c,
-  palmTrunk: 0x7a5a38,
-  palmLeaf: 0x2f8f4a,
-  copBlue: 0x1c4fd8,
-  copWhite: 0xf2f2f2,
-  taxiYellow: 0xffc93c,
+  sunDusk: 0xffb36b,
+  ground: 0x2b2f36,
+  road: 0x23262c,
+  sidewalk: 0x3a3f47,
+  sand: 0xc2a878,
+  sea: 0x1d4e6b,
+  building: [0x8a7f72, 0x6f7d8c, 0x9c8a6a, 0x7a6a72, 0x5f6e5a, 0x8c6f5a, 0x707a80, 0x9a8f7d, 0x646e7a, 0x7d7468, 0x55606e, 0xa08a70],
+  neon: [0xff2d78, 0x00e5ff, 0xffd23f, 0x7c4dff, 0x39ff88],
+  car: [0xc23b2e, 0x2e6fc2, 0xe0a92e, 0x3aa655, 0xdddddd, 0x222226, 0x7a4fd0, 0xd06a2e],
 };
 
-// Landmarks: every mission, beacon and the minimap read these same spots.
-export const LANDMARKS = {
-  spawn: { x: 0, z: 196 },
-  pier: { x: 0, z: 268 },
-  pierEnd: { x: 0, z: 330 },
-  marina: { x: -216, z: 300 },
-  marinaDock: { x: -204, z: 296 },
-  tower: { x: -60, z: -60 },
-  towerRoof: { x: -60, z: -42 },
-  bank: { x: -120, z: 60 },
-  bankLobby: { x: -120, z: 48 },
-  casino: { x: 60, z: 180 },
-  casinoVault: { x: 60, z: 168 },
-  stadium: { x: 180, z: -180 },
-  lighthouse: { x: 264, z: 296 },
-  hospital: { x: -180, z: -120 },
-  precinct: { x: 120, z: -60 },
-  hideout: { x: -240, z: 228 },
-  marasPlace: { x: 240, z: 228 },
-  safehouse: { x: -228, z: -228 },
-  rampPier: { x: 24, z: 252 },
-  rampStadium: { x: 150, z: -150 },
-  rampBeach: { x: -150, z: 252 },
-  smugglerStart: { x: -120, z: 330 },
-};
-
-// Mara's eight jobs, in order. type drives the mission state machine:
-// goto = reach the marker; steal = steal any car then reach it; hold = stand
-// in the zone for holdSeconds; boat = board the speedboat and stay close to
-// the smuggler's boat for chaseSeconds; stunt = clear the ramp and land in
-// the zone; escape = reach the marker while wanted stays at least wantedMin.
-export const MISSIONS = [
-  {
-    id: 1, title: 'First Errand', type: 'goto',
-    brief: 'Mara: "A package is waiting on the pier. Walk it back to me — no, just get it. The timer is real."',
-    target: { x: 0, z: 268 }, timeLimit: 150, pay: 500,
-    hint: 'Follow the yellow beacon to the pier. Run with Shift.',
-  },
-  {
-    id: 2, title: 'Getaway Driver', type: 'steal',
-    brief: 'Mara: "I need wheels and I need them gone. Take a parked car — any car — and bring it to the hideout. The cops will notice."',
-    target: { x: -240, z: 228 }, timeLimit: 180, pay: 900, wantedMin: 2,
-    hint: 'Press E near a parked car to steal it. Then drive to the hideout beacon.',
-  },
-  {
-    id: 3, title: 'Bank Job', type: 'hold',
-    brief: 'Mara: "First Solmar Bank, lobby, ten seconds of nerve. Then run — the whole precinct is coming."',
-    target: { x: -120, z: 48 }, holdSeconds: 10, escape: { x: -228, z: -228 }, timeLimit: 240, pay: 2200,
-    hint: 'Stand in the glowing lobby zone until the bar fills, then escape to the safe house.',
-  },
-  {
-    id: 4, title: 'Boat Chase', type: 'boat',
-    brief: 'Mara: "A smuggler is running the coast in a speedboat. Take my boat from the marina and run him down. Stay on him."',
-    target: { x: -204, z: 296 }, chaseTarget: { x: -120, z: 330 }, chaseSeconds: 8, timeLimit: 240, pay: 2600,
-    hint: 'Board the boat at the marina dock (E), then chase the red boat along the coast.',
-  },
-  {
-    id: 5, title: 'Night Run', type: 'goto',
-    brief: 'Mara: "One delivery, cross-city, after dark. No headlights, no stops. The city is quieter at night — use it."',
-    target: { x: 240, z: 228 }, timeLimit: 200, pay: 1500, forceNight: true,
-    hint: 'Drive or run to Mara’s place on the east beachfront before dawn.',
-  },
-  {
-    id: 6, title: 'Stunt Jump', type: 'stunt',
-    brief: 'Mara: "The crew wants a show. Take the pier ramp at full speed and land it clean. Cameras are rolling."',
-    target: { x: 24, z: 252 }, landZone: { x: 24, z: 296 }, timeLimit: 180, pay: 1800,
-    hint: 'Steal a car, hit the pier ramp fast, and land inside the glowing zone.',
-  },
-  {
-    id: 7, title: 'Rooftop Heist', type: 'escape',
-    brief: 'Mara: "A briefcase on the Solmar Tower terrace. Four stars the moment you touch it, and a helicopter that never blinks."',
-    target: { x: -60, z: -42 }, escape: { x: -228, z: -228 }, timeLimit: 260, pay: 3400, wantedOnGrab: 4,
-    hint: 'Grab the briefcase on the tower terrace, then lose the helicopter and reach the safe house.',
-  },
-  {
-    id: 8, title: 'The Big Score', type: 'hold',
-    brief: 'Mara: "The Grand Solmar vault. Eight seconds inside, then five stars, roadblocks, a helicopter, everything. Bring it home."',
-    target: { x: 60, z: 168 }, holdSeconds: 8, escape: { x: 240, z: 228 }, timeLimit: 300, pay: 5000, wantedOnHold: 5,
-    hint: 'Hold the vault zone, then escape through the roadblocks to Mara’s place.',
-  },
-];
-
-// Ten gold briefcases, hidden around the city. Each pays $250 on pickup.
-export const COLLECTIBLES = [
-  { x: -240, z: 270, note: 'under the west pier boards' },
-  { x: 120, z: 270, note: 'behind the beach kiosk' },
-  { x: 264, z: 282, note: 'at the lighthouse base' },
-  { x: -60, z: -84, note: 'behind Solmar Tower' },
-  { x: 180, z: -150, note: 'by the stadium gate' },
-  { x: -180, z: -144, note: 'hospital courtyard' },
-  { x: 120, z: -84, note: 'precinct steps' },
-  { x: -228, z: -204, note: 'safe-house alley' },
-  { x: 240, z: 204, note: 'Mara’s garden wall' },
-  { x: -204, z: 282, note: 'marina fuel dock' },
-];
+export const SAVE_KEY = 'solmar-city.save.v1';
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
