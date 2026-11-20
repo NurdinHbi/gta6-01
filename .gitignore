@@ -1,4 +1,17 @@
-node_modules/
+# Solmar City round 5 — build artifacts and local junk ignored by git.
+# The build output (main.ts copies game/ + screenshots/ here) and the usual
+# Node / editor / OS noise never belong in the repo. The game itself
+# (game/, screenshots/, main.ts, serve.ts, vendor/, README.md) is tracked.
 out/
-.DS_Store
+node_modules/
+dist/
 *.log
+shots-staging/
+screenshots/*.png
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/

@@ -3,80 +3,98 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Solmar City — open-world crime game</title>
-<link rel="icon" href="data:,">
+<title>Solmar City — an open-world crime game</title>
 <link rel="stylesheet" href="./style.css">
+<script type="importmap">
+{ "imports": { "three": "./vendor/three.module.js" } }
+</script>
 </head>
 <body>
-<canvas id="game" aria-label="Solmar City: an open-world crime game. Drive, run missions for Mara, and stay ahead of the police."></canvas>
+<canvas id="game" aria-label="Solmar City: an open-world crime game. Drive, steal cars, outrun the police and finish Mara's eight jobs."></canvas>
 
-<div id="hud" class="hidden-until-play">
-  <div id="hud-top-left">
-    <div id="stars" aria-label="wanted level">☆☆☆☆☆</div>
-    <div id="health-row">
-      <div id="health-bar"><div id="health-fill"></div></div>
-      <span id="health-text">100 HP</span>
-    </div>
-    <div id="cash">$200</div>
-    <div id="clock">10:30 ☀</div>
+<div id="hud">
+  <div id="top-left">
+    <div id="stars">☆☆☆☆☆</div>
+    <div id="cash">$250</div>
+    <div id="health"><div id="health-fill"></div><span id="health-text">HP 100</span></div>
+    <div id="clock">17:24 ☀️</div>
+    <div id="weapon">Pistol 12 / 12 [1/2/3]</div>
   </div>
-  <div id="hud-top-right">
-    <div id="speed">0 km/h</div>
-    <div id="weapon">Pistol · ∞</div>
-    <div id="collectibles">Packages 0/12</div>
+  <div id="top-right">
+    <canvas id="minimap" width="200" height="200"></canvas>
+    <div id="map-label">SOLMAR CITY</div>
   </div>
-  <div id="objective-panel">
-    <div id="mission-name">Free Roam</div>
-    <div id="objective">Press M to start Mara's first mission</div>
+  <div id="objective">
+    <div id="objective-title">Job 1: First Errand</div>
+    <div id="objective-brief"></div>
+    <div id="objective-hint"></div>
+    <div id="timer"></div>
+    <div id="progress-wrap"><div id="progress-fill"></div></div>
   </div>
-  <canvas id="minimap" width="180" height="180" aria-label="minimap"></canvas>
-  <div id="notify" class="hidden"></div>
-  <div id="controls-hint">WASD move · Shift run · E enter car/boat · F punch · Click shoot · 1/2/3 weapons · M mission · P pause · drag to look</div>
+  <div id="speed-box"><div id="speed">0 km/h</div><div id="speed-hint">W/S drive · Space handbrake · E exit</div></div>
+  <div id="feed"></div>
+  <div id="banner"><div id="banner-title"></div><div id="banner-sub"></div></div>
+  <div id="mute-note">🔊 Sound on (M)</div>
+  <div id="controls-hint">WASD move · Shift run · drag mouse to look · F shoot · Space punch · E enter car · P pause</div>
 </div>
 
-<div id="title-screen" class="overlay">
+<div id="menu" class="overlay">
   <div class="panel">
     <h1>SOLMAR CITY</h1>
-    <p class="tagline">A sun-soaked coastal city. One fixer named Mara. Eight jobs between you and the top.</p>
-    <div id="mission-list"></div>
-    <div class="buttons">
-      <button id="btn-start">New Game</button>
-      <button id="btn-continue" class="hidden">Continue</button>
-    </div>
-    <p class="controls">WASD move · Shift run · E enter/exit car or boat · F punch · Click shoot · 1 pistol / 2 shotgun / 3 SMG · M start mission · P pause · drag mouse to look around</p>
-    <p class="fine">Steal cars, run Mara's missions, collect the 12 hidden packages, hit the stunt jumps — and mind the stars. Original game, original city, no Rockstar content.</p>
+    <p class="tagline">Sun. Sea. Speed. And a fixer named Mara.</p>
+    <p class="blurb">Eight jobs. One coastal city. About 150 buildings, a beach, a pier, traffic,
+      pedestrians, police who do not forgive, and a helicopter that never blinks.
+      Steal a car, lose the heat, get paid.</p>
+    <button id="btn-new">▶ New Game</button>
+    <button id="btn-continue">↻ Continue</button>
+    <button id="btn-help">? How to play</button>
+    <p id="save-note"></p>
+    <p class="fine">An original game for the make.fun gta6-01 bounty. No network needed — it runs
+      entirely from these files. Enter or click New Game to start.</p>
   </div>
 </div>
 
-<div id="busted-screen" class="overlay hidden">
+<div id="help" class="overlay">
   <div class="panel">
-    <h1 class="busted">BUSTED</h1>
-    <p>The Solmar PD caught up with you. You lose 10% of your cash.</p>
-    <div class="buttons"><button id="btn-busted">Back to the streets</button></div>
+    <h1>HOW TO PLAY</h1>
+    <table>
+      <tr><td>W A S D</td><td>Move / drive (W accelerate, S brake &amp; reverse)</td></tr>
+      <tr><td>Shift</td><td>Run on foot</td></tr>
+      <tr><td>Mouse drag</td><td>Orbit camera · C toggles chase cam while driving</td></tr>
+      <tr><td>Space</td><td>Punch on foot · handbrake while driving</td></tr>
+      <tr><td>F / click</td><td>Shoot · 1/2/3 weapons · R reload</td></tr>
+      <tr><td>E</td><td>Enter / exit a car or boat</td></tr>
+      <tr><td>P / Esc</td><td>Pause · M mute</td></tr>
+    </table>
+    <p>Follow the yellow beacon and the minimap marker. Stealing cars, hitting
+      pedestrians and shooting in public raise your wanted level: foot cops chase at
+      1 star, cruisers at 2, roadblocks and a helicopter at 4. Lose them by breaking
+      line of sight and staying quiet. Busted or Wasted costs 10% of your cash.</p>
+    <p>Between jobs: 10 gold briefcases are hidden around the city ($250 each) and
+      3 stunt ramps pay $600 for a clean landing. Progress saves automatically.</p>
+    <button id="btn-help-close">← Back</button>
   </div>
 </div>
 
-<div id="wasted-screen" class="overlay hidden">
-  <div class="panel">
-    <h1 class="wasted">WASTED</h1>
-    <p>You wake up at the safehouse, lighter by 10% of your cash.</p>
-    <div class="buttons"><button id="btn-wasted">Back to the streets</button></div>
-  </div>
-</div>
-
-<div id="pause-screen" class="overlay hidden">
+<div id="pause" class="overlay">
   <div class="panel">
     <h1>PAUSED</h1>
-    <p>Solmar City waits for no one — except right now.</p>
-    <div class="buttons">
-      <button id="btn-resume">Resume</button>
-      <button id="btn-restart">Restart from scratch</button>
-    </div>
+    <p class="blurb">Solmar waits for no one. Except now.</p>
+    <button id="btn-resume">▶ Resume</button>
+    <button id="btn-restart">↻ Restart current job</button>
+    <button id="btn-quit">■ Save &amp; quit to title</button>
+  </div>
+</div>
+
+<div id="end" class="overlay">
+  <div class="panel">
+    <h1 id="end-title">BUSTED</h1>
+    <p id="end-text" class="blurb"></p>
+    <button id="end-button">Continue — respawn</button>
   </div>
 </div>
 
 <p id="status" role="status" aria-live="polite"></p>
-<script src="./three.min.js"></script>
-<script type="module" src="./js/main.js"></script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>
