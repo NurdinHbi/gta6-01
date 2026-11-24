@@ -1,6 +1,7 @@
 // Boot and the one loop: input is read every frame, the world advances in
 // fixed 1/60 s steps, and the renderer paints what is there. Screens: title,
-// help, play, paused, busted, wasted. Progress is saved to localStorage.
+// help, play, paused, busted, wasted, garage. Progress is saved to
+// localStorage.
 //
 // ?seed=N fixes the city and traffic. ?shot=start|chase|night|end (with
 // &seed=N) stages that scene instead of running the loop, paints it a few
@@ -51,7 +52,7 @@ game.saveProgress = saveProgress;
 const save = readSave();
 if (save) {
   game.applySave(save);
-  missions.jobIndex = Math.min(save.jobsDone || 0, 7);
+  missions.jobIndex = Math.min(save.jobsDone || 0, 8);
 }
 
 let screen = 'title';
@@ -77,6 +78,8 @@ function startGame(fresh) {
     game.state.jobsDone = 0;
     game.state.briefcasesFound = 0;
     game.state.bestStunt = 0;
+    game.state.taxiJobsDone = 0;
+    game.state.garageUpgrades = 0;
     game.state.health = PLAYER.maxHealth;
     game.setWanted(0);
     game.player.x = PLAYER.startX;
@@ -90,11 +93,13 @@ function startGame(fresh) {
     }
     for (const r of game.world.ramps) r.used = false;
     missions.jobIndex = 0;
+    missions.finishedAll = false;
   }
   audio.unlock();
   screen = 'play';
   hud.showScreen('none');
-  announce('Playing. Follow Mara\'s job — the yellow beacon marks the target.');
+  missions.beginJob();
+  announce("Playing. Follow Mara's job — the yellow beacon marks the target.");
 }
 
 function endScreen(kind) {
@@ -178,6 +183,7 @@ function runGame() {
       }
       return actions;
     }
+    if (screen === 'garage') return actions;
     if (screen === 'pause') {
       if (actions & (ACTION_PAUSE | ACTION_CONFIRM)) {
         screen = 'play';
@@ -198,6 +204,16 @@ function runGame() {
     accumulator += Math.min((now - last) / 1000, MAX_FRAME);
     last = now;
     const actions = handleActions();
+    // Driving into the garage pad and pressing G opens the garage screen.
+    if (screen === 'play' && game.state.garageOpen) {
+      screen = 'garage';
+      hud.showScreen('garage');
+    }
+    // The garage screen's Leave button clears garageOpen; resume play.
+    if (screen === 'garage' && !game.state.garageOpen) {
+      screen = 'play';
+      hud.showScreen('none');
+    }
     const paused = screen !== 'play';
     while (accumulator >= STEP) {
       const events = game.step(STEP, input, screen === 'play' ? actions : 0, paused);
@@ -209,7 +225,7 @@ function runGame() {
         endScreen(game.state.over);
       }
     }
-    if (screen === 'play' || screen === 'pause' || screen === 'title') {
+    if (screen === 'play' || screen === 'pause' || screen === 'title' || screen === 'garage') {
       game.render();
       hud.update(missions);
     }
@@ -219,7 +235,7 @@ function runGame() {
   requestAnimationFrame(frame);
 }
 
-// Debug handle for automated playtests (not part of the game UI).
+// Debug handles for automated playtests (not part of the game UI).
 window.__game = game;
 window.__missions = missions;
 window.__hud = hud;

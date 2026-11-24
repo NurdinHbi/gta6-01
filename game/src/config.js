@@ -1,5 +1,5 @@
-// Every tuning number, weapon, job and colour in one place. The city is a
-// 10x10 block grid; one block pitch is BLOCK + ROAD wide.
+// Solmar City round 7 — tuning numbers, jobs, weapons, taxi fares, garage.
+// The city is a 10x10 block grid; one block pitch is BLOCK + ROAD wide.
 export const STEP = 1 / 60;
 
 export const CITY = {
@@ -35,7 +35,6 @@ export const WEAPONS = [
 
 export const WANTED = {
   decayQuiet: 0.045, // stars per second while unseen and quiet
-  decaySeen: 0.0,
   steal: 1,
   hitPed: 1,
   shootPublic: 1,
@@ -43,18 +42,34 @@ export const WANTED = {
   max: 5,
 };
 
-export const TRAFFIC_CARS = 10;
-export const PARKED_CARS = 13;
-export const PEDESTRIANS = 24;
+export const TRAFFIC_CARS = 14;
+export const PARKED_CARS = 14;
+export const PEDESTRIANS = 34;
 export const BRIEFCASES = 10;
 export const STUNT_RAMPS = 3;
+export const TAXI_STANDS = 5;
 
 export const BRIEFCASE_REWARD = 250;
 export const STUNT_REWARD = 600;
 export const BUSTED_LOSS = 0.1; // fraction of cash lost on Busted / Wasted
 
-// Mara's eight jobs, in order. Each objective is one step of the job; the
-// state machine in missions.js walks them in order.
+// Taxi side-jobs: flag a waiting passenger (yellow TAXI marker), drive them
+// to the beacon before the meter timer runs out. Fare ticks up with distance.
+export const TAXI = {
+  baseFare: 40,
+  perMetre: 0.55,
+  timeLimit: 150,
+  tipPerfect: 50, // bonus for arriving with more than half the time left
+};
+
+export const GARAGE = {
+  repairCost: 100,
+  repaintCost: 50,
+  underglowCost: 150,
+  spoilerCost: 120,
+};
+
+// Mara's nine jobs, in order. Job 9 is new in round 7: the Harbor Heist.
 export const JOBS = [
   {
     id: 1, name: 'First Errand', payout: 500, timeLimit: 150,
@@ -118,10 +133,20 @@ export const JOBS = [
   {
     id: 8, name: 'The Big Score', payout: 10000, timeLimit: 420,
     intro: 'Mara: hit the Grand Solmar vault and bring the money home through the roadblocks.',
-    done: 'The Big Score is yours. Solmar City is your playground now. +$10,000',
+    done: 'The Big Score is yours. +$10,000',
     objectives: [
       { type: 'hold', label: 'Crack the Grand Solmar vault', x: -60, z: 132, radius: 9, hold: 12 },
       { type: 'goto', label: 'Bring the money home through the roadblocks', x: 150, z: -150, radius: 8, wanted: 5 },
+    ],
+  },
+  {
+    id: 9, name: 'Harbor Heist', payout: 6000, timeLimit: 420,
+    intro: 'Mara: one last job — grab the harbor shipment, hold the warehouse, and bring it home through the rain.',
+    done: 'Harbor Heist complete. Solmar City is yours. +$6,000',
+    objectives: [
+      { type: 'pickup', label: 'Grab the harbor shipment at the north docks', x: 24, z: -168, radius: 4 },
+      { type: 'hold', label: 'Hold the warehouse while the crew loads up', x: 60, z: -150, radius: 9, hold: 12 },
+      { type: 'goto', label: 'Bring the shipment home to the hideout', x: 150, z: -150, radius: 8, wanted: 4 },
     ],
   },
 ];
@@ -135,12 +160,14 @@ export const PALETTE = {
   sunDusk: 0xffb36b,
   ground: 0x2b2f36,
   road: 0x23262c,
+  roadWet: 0x1e222c,
   sidewalk: 0x3a3f47,
   sand: 0xc2a878,
   sea: 0x1d4e6b,
   building: [0x8a7f72, 0x6f7d8c, 0x9c8a6a, 0x7a6a72, 0x5f6e5a, 0x8c6f5a, 0x707a80, 0x9a8f7d, 0x646e7a, 0x7d7468, 0x55606e, 0xa08a70],
   neon: [0xff2d78, 0x00e5ff, 0xffd23f, 0x7c4dff, 0x39ff88],
-  car: [0xc23b2e, 0x2e6fc2, 0xe0a92e, 0x3aa655, 0xdddddd, 0x222226, 0x7a4fd0, 0xd06a2e],
+  car: [0xc23b2e, 0x2e6fc2, 0xe0a92e, 0x3aa655, 0xdddddd, 0x222226, 0x7a4fd0, 0xd06a2e, 0x12b5a5, 0xe06ab0],
+  taxiYellow: 0xf7c948,
 };
 
 export const SAVE_KEY = 'solmar-city.save.v1';

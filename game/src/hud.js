@@ -1,242 +1,241 @@
-// HUD: DOM panels (wanted stars, health, cash, clock, speed, objective,
-// message feed) plus a live 2D minimap canvas and the title / help / pause /
-// Busted / Wasted screens.
-import { CITY, WEAPONS, FONT } from './config.js';
+// HUD: DOM panels (wanted stars, health, cash, clock, weather, radio,
+// objective, message feed, taxi meter) plus a live 2D minimap canvas and
+// the title / help / pause / Busted / Wasted / garage screens.
+import { CITY, WEAPONS, FONT, GARAGE } from './config.js';
+import { RADIO_STATIONS } from './audio.js';
 
 function fmtClock(timeSec) {
   const h = Math.floor(timeSec / 3600) % 24;
   const m = Math.floor((timeSec % 3600) / 60);
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
-
-function fmtTimer(sec) {
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+function fmtMoney(n) { return `$${Math.floor(n).toLocaleString('en-US')}`; }
 
 export function createHud(game) {
+  const { state, player, world } = game;
   const root = document.getElementById('hud');
   root.innerHTML = `
-    <div id="hud-top-left">
-      <div id="hud-stars"></div>
-      <div id="hud-health"><div id="hud-health-fill"></div><span id="hud-health-text"></span></div>
-      <div id="hud-cash"></div>
-      <div id="hud-weapon"></div>
-    </div>
-    <div id="hud-top-right">
-      <div id="hud-clock"></div>
-      <div id="hud-speed"></div>
+    <div id="hud-top">
+      <div class="hud-box" id="hud-cash">$250</div>
+      <div class="hud-box" id="hud-health"><span class="bar"><span id="health-fill"></span></span><span id="health-num">100</span></div>
+      <div class="hud-box" id="hud-wanted" aria-label="wanted level"></div>
+      <div class="hud-box" id="hud-clock">17:36</div>
+      <div class="hud-box" id="hud-weather">Dry</div>
+      <div class="hud-box" id="hud-radio">Radio off</div>
     </div>
     <div id="hud-objective"></div>
-    <div id="hud-feed"></div>
-    <div id="hud-crosshair">+</div>
-    <canvas id="hud-minimap" width="220" height="220"></canvas>
+    <div id="hud-taxi" class="hidden"></div>
+    <div id="hud-messages"></div>
+    <div id="hud-speed" class="hidden"></div>
+    <canvas id="minimap" width="190" height="190"></canvas>
     <div id="hud-screen"></div>
   `;
-  const starsEl = document.getElementById('hud-stars');
-  const healthFill = document.getElementById('hud-health-fill');
-  const healthText = document.getElementById('hud-health-text');
-  const cashEl = document.getElementById('hud-cash');
-  const weaponEl = document.getElementById('hud-weapon');
-  const clockEl = document.getElementById('hud-clock');
-  const speedEl = document.getElementById('hud-speed');
-  const objectiveEl = document.getElementById('hud-objective');
-  const feedEl = document.getElementById('hud-feed');
-  const crosshair = document.getElementById('hud-crosshair');
-  const minimap = document.getElementById('hud-minimap');
-  const screenEl = document.getElementById('hud-screen');
-  const mm = minimap.getContext('2d');
+  const el = {
+    cash: document.getElementById('hud-cash'),
+    healthFill: document.getElementById('health-fill'),
+    healthNum: document.getElementById('health-num'),
+    wanted: document.getElementById('hud-wanted'),
+    clock: document.getElementById('hud-clock'),
+    weather: document.getElementById('hud-weather'),
+    radio: document.getElementById('hud-radio'),
+    objective: document.getElementById('hud-objective'),
+    taxi: document.getElementById('hud-taxi'),
+    messages: document.getElementById('hud-messages'),
+    speed: document.getElementById('hud-speed'),
+    minimap: document.getElementById('minimap'),
+    screen: document.getElementById('hud-screen'),
+  };
+  const mapCtx = el.minimap.getContext('2d');
+  let lastScreen = null;
+  let lastMsgCount = 0;
 
-  let lastFeed = '';
-
-  function drawMinimap() {
-    const { state, player, world } = game;
-    const S = 220;
-    const scale = S / 460; // world -230..230 maps to the canvas
-    const toX = (x) => (x + 230) * scale;
-    const toY = (z) => (z + 230) * scale;
-    mm.clearRect(0, 0, S, S);
-    mm.fillStyle = '#20242c';
-    mm.fillRect(0, 0, S, S);
-    // Sea (west) and beach.
-    mm.fillStyle = '#1d4e6b';
-    mm.fillRect(0, 0, toX(-190), S);
-    mm.fillStyle = '#c2a878';
-    mm.fillRect(toX(-190), 0, toX(-176) - toX(-190), S);
-    // Streets.
-    mm.strokeStyle = '#4a505c';
-    mm.lineWidth = 5;
-    for (let k = -5; k <= 5; k += 1) {
-      const a = k * 38;
-      mm.beginPath();
-      mm.moveTo(toX(a), 0);
-      mm.lineTo(toX(a), S);
-      mm.stroke();
-      mm.beginPath();
-      mm.moveTo(0, toY(a));
-      mm.lineTo(S, toY(a));
-      mm.stroke();
+  function drawMinimap(missions) {
+    const S = 190;
+    const scale = S / (CITY.half * 2 + 40);
+    const toX = (x) => (x + CITY.half + 20) * scale;
+    const toY = (z) => (z + CITY.half + 20) * scale;
+    mapCtx.fillStyle = '#10141c';
+    mapCtx.fillRect(0, 0, S, S);
+    // Sea.
+    mapCtx.fillStyle = '#1d4e6b';
+    mapCtx.fillRect(0, 0, toX(CITY.seaX) - toX(-CITY.half - 20), S);
+    // Roads.
+    mapCtx.strokeStyle = '#3a3f47';
+    mapCtx.lineWidth = 2;
+    for (let i = 0; i <= CITY.blocks; i += 1) {
+      const c = -CITY.half + i * 38 - 6 + 6;
+      mapCtx.beginPath(); mapCtx.moveTo(toX(c), 0); mapCtx.lineTo(toX(c), S); mapCtx.stroke();
+      mapCtx.beginPath(); mapCtx.moveTo(0, toY(c)); mapCtx.lineTo(S, toY(c)); mapCtx.stroke();
     }
     // Landmarks.
-    mm.fillStyle = '#8a7f72';
-    mm.fillRect(toX(8), toY(8), 22 * scale, 22 * scale); // tower
-    mm.fillStyle = '#7a2a4a';
-    mm.fillRect(toX(-70), toY(123), 26 * scale, 20 * scale); // casino
-    mm.fillStyle = '#b8a888';
-    mm.fillRect(toX(47), toY(-27), 20 * scale, 16 * scale); // bank
-    mm.fillStyle = '#5a6e8c';
-    mm.fillRect(toX(-167), toY(-125), 30 * scale, 22 * scale); // stadium
-    // Briefcases not yet found.
-    mm.fillStyle = '#ffd23f';
-    for (const b of world.briefcases) {
-      if (!b.found) {
-        mm.beginPath();
-        mm.arc(toX(b.x), toY(b.z), 2.5, 0, Math.PI * 2);
-        mm.fill();
+    mapCtx.fillStyle = '#e0a92e';
+    for (const [x, z] of [[12, 12], [-60, 132], [60, -24], [-150, -120], [150, -150], [-206, 150]]) {
+      mapCtx.fillRect(toX(x) - 3, toY(z) - 3, 6, 6);
+    }
+    // Garage.
+    mapCtx.fillStyle = '#3fa0ff';
+    mapCtx.fillRect(toX(150) - 4, toY(-150) - 4, 8, 8);
+    // Taxi passengers waiting.
+    mapCtx.fillStyle = '#f7c948';
+    for (const tp of world.taxiPassengers) {
+      if (tp.active && !tp.taken) {
+        mapCtx.beginPath(); mapCtx.arc(toX(tp.x), toY(tp.z), 4, 0, Math.PI * 2); mapCtx.fill();
       }
     }
-    // Mission beacon.
-    if (state.beacon) {
-      const pulse = 4 + Math.sin(performance.now() / 200) * 1.5;
-      mm.fillStyle = '#ff5d8f';
-      mm.beginPath();
-      mm.arc(toX(state.beacon.x), toY(state.beacon.z), pulse, 0, Math.PI * 2);
-      mm.fill();
-      mm.strokeStyle = '#ffffff';
-      mm.lineWidth = 1;
-      mm.stroke();
+    // Objective beacon.
+    const obj = missions && missions.active ? missions.objective : null;
+    if (obj && obj.x !== undefined && obj.type !== 'enterCar' && obj.type !== 'loseHeat') {
+      const bx = obj.type === 'chase' ? world.smuggler.x : obj.x;
+      const bz = obj.type === 'chase' ? world.smuggler.z : obj.z;
+      mapCtx.fillStyle = '#ffd23f';
+      mapCtx.beginPath(); mapCtx.arc(toX(bx), toY(bz), 6, 0, Math.PI * 2); mapCtx.fill();
+      mapCtx.strokeStyle = '#ffd23f';
+      mapCtx.beginPath(); mapCtx.arc(toX(bx), toY(bz), 10, 0, Math.PI * 2); mapCtx.stroke();
     }
-    // Smuggler boat while chasing.
-    if (game.missions && game.missions.currentObjective() && game.missions.currentObjective().type === 'chase') {
-      mm.fillStyle = '#ff2222';
-      mm.beginPath();
-      mm.arc(toX(world.smugglerBoat.position.x), toY(world.smugglerBoat.position.z), 4, 0, Math.PI * 2);
-      mm.fill();
+    if (state.taxiActive && state.taxiDest) {
+      mapCtx.fillStyle = '#f7c948';
+      mapCtx.beginPath(); mapCtx.arc(toX(state.taxiDest.x), toY(state.taxiDest.z), 6, 0, Math.PI * 2); mapCtx.fill();
     }
     // Police.
-    mm.fillStyle = '#2244ff';
+    mapCtx.fillStyle = '#ff4444';
     for (const cop of world.cops) {
-      mm.beginPath();
-      mm.arc(toX(cop.x), toY(cop.z), 3, 0, Math.PI * 2);
-      mm.fill();
+      if (!cop.dead) mapCtx.fillRect(toX(cop.x) - 2, toY(cop.z) - 2, 4, 4);
     }
-    for (const c of world.cruisers) {
-      mm.beginPath();
-      mm.arc(toX(c.x), toY(c.z), 3.5, 0, Math.PI * 2);
-      mm.fill();
+    // Player.
+    mapCtx.fillStyle = '#ffffff';
+    mapCtx.beginPath(); mapCtx.arc(toX(player.x), toY(player.z), 5, 0, Math.PI * 2); mapCtx.fill();
+    mapCtx.strokeStyle = '#2e6fc2';
+    mapCtx.lineWidth = 2;
+    mapCtx.stroke();
+  }
+
+  function showScreen(kind, data = {}) {
+    lastScreen = kind;
+    const s = el.screen;
+    if (kind === 'none') { s.innerHTML = ''; s.className = ''; return; }
+    s.className = 'screen-on';
+    if (kind === 'title') {
+      const save = data.save;
+      s.innerHTML = `
+        <div class="screen-panel">
+          <h1>SOLMAR CITY</h1>
+          <p class="tagline">A 3D open-world crime game — taxi fares, a safehouse garage, rain-slick streets and nine Mara jobs.</p>
+          <p class="controls">WASD move &middot; E enter car &middot; F shoot &middot; T taxi fare &middot; G garage &middot; Q radio &middot; 1/2/3 weapons &middot; P pause &middot; M mute</p>
+          ${save ? `<p class="save-line">Save: ${fmtMoney(save.cash)} &middot; ${save.jobsDone || 0}/9 jobs &middot; ${save.briefcasesFound || 0}/10 briefcases &middot; ${save.taxiJobsDone || 0} taxi fares</p>` : ''}
+          <div class="btn-row">
+            <button data-act="start">New game</button>
+            ${data.hasSave ? '<button data-act="continue">Continue</button>' : ''}
+            <button data-act="help">How to play</button>
+          </div>
+        </div>`;
+    } else if (kind === 'help') {
+      s.innerHTML = `
+        <div class="screen-panel">
+          <h1>HOW TO PLAY</h1>
+          <p>Work Mara's nine jobs — the yellow beacon marks the target. On foot: WASD, Shift to run, Space to punch, F or click to shoot, 1/2/3 weapons, R reload. Drive with W/S and A/D, Space is the handbrake, E exits.</p>
+          <p><b>Taxi (T):</b> drive a car up to a waiting passenger at a yellow TAXI sign, press T, and deliver them before the meter runs out. Fares pay by distance, fast trips earn a tip.</p>
+          <p><b>Garage (G):</b> drive into the blue pad at the safehouse (south-east corner) and press G to repair, repaint, fit neon underglow or a spoiler. A customized car is yours — stealing it raises no heat.</p>
+          <p><b>Radio (Q):</b> cycles Solmar FM, Neon Nights and Beach Radio while you drive. Rain rolls in on its own — wet roads, darker skies. Watch the wanted stars: foot cops at 1, cruisers at 2, roadblocks and a helicopter at 4.</p>
+          <div class="btn-row"><button data-act="back">Back</button></div>
+        </div>`;
+    } else if (kind === 'pause') {
+      s.innerHTML = `
+        <div class="screen-panel">
+          <h1>PAUSED</h1>
+          <p>${fmtMoney(state.cash)} &middot; ${state.jobsDone}/9 jobs &middot; ${state.briefcasesFound}/10 briefcases</p>
+          <div class="btn-row"><button data-act="resume">Resume</button><button data-act="quit">Quit to title</button></div>
+        </div>`;
+    } else if (kind === 'busted' || kind === 'wasted') {
+      s.innerHTML = `
+        <div class="screen-panel">
+          <h1>${kind === 'busted' ? 'BUSTED' : 'WASTED'}</h1>
+          <p>You lost ${fmtMoney(data.loss || 0)}. The city keeps moving.</p>
+          <div class="btn-row"><button data-act="respawn">Get back out there</button></div>
+        </div>`;
+    } else if (kind === 'garage') {
+      const car = state.car;
+      const health = car ? Math.round(car.health) : 0;
+      s.innerHTML = `
+        <div class="screen-panel">
+          <h1>SAFEHOUSE GARAGE</h1>
+          <p>${car ? `${car.type} &middot; health ${health}%` : 'No car'} &middot; cash ${fmtMoney(state.cash)}</p>
+          <p id="garage-result" class="garage-result"></p>
+          <div class="btn-row">
+            <button data-act="repair">Repair — $${GARAGE.repairCost}</button>
+            <button data-act="repaint">Repaint — $${GARAGE.repaintCost}</button>
+            <button data-act="underglow">Neon underglow — $${GARAGE.underglowCost}</button>
+            <button data-act="spoiler">Spoiler — $${GARAGE.spoilerCost}</button>
+          </div>
+          <div class="btn-row"><button data-act="leave">Leave garage</button></div>
+        </div>`;
+      s.querySelectorAll('button[data-act]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const act = btn.dataset.act;
+          const result = s.querySelector('#garage-result');
+          if (act === 'leave') {
+            state.garageOpen = false;
+            showScreen('none');
+            return;
+          }
+          let text = '';
+          if (act === 'repair') text = game.garageRepair();
+          if (act === 'repaint') text = game.garageRepaint();
+          if (act === 'underglow') text = game.garageUnderglow();
+          if (act === 'spoiler') text = game.garageSpoiler();
+          if (result) result.textContent = text;
+          if (game.saveProgress) game.saveProgress();
+        });
+      });
     }
-    if (world.heliGroup.visible) {
-      mm.fillStyle = '#ff8800';
-      mm.beginPath();
-      mm.arc(toX(world.heliGroup.position.x), toY(world.heliGroup.position.z), 4, 0, Math.PI * 2);
-      mm.fill();
-    }
-    // Player car / player.
-    if (state.driving && state.car) {
-      mm.fillStyle = '#39ff88';
-      mm.fillRect(toX(state.car.x) - 3, toY(state.car.z) - 3, 6, 6);
-    }
-    const px = toX(player.x);
-    const py = toY(player.z);
-    mm.save();
-    mm.translate(px, py);
-    mm.rotate(Math.atan2(Math.sin(player.angle), Math.cos(player.angle)) + Math.PI);
-    mm.fillStyle = '#ffffff';
-    mm.beginPath();
-    mm.moveTo(0, -7);
-    mm.lineTo(5, 6);
-    mm.lineTo(-5, 6);
-    mm.closePath();
-    mm.fill();
-    mm.restore();
-    mm.strokeStyle = 'rgba(255,255,255,0.35)';
-    mm.lineWidth = 1;
-    mm.strokeRect(0.5, 0.5, S - 1, S - 1);
   }
 
   function update(missions) {
-    const { state, player } = game;
-    starsEl.textContent = '★'.repeat(state.wanted) + '☆'.repeat(5 - state.wanted);
-    starsEl.style.color = state.wanted >= 4 ? '#ff3355' : state.wanted >= 2 ? '#ffaa00' : '#ffffff';
-    const hp = Math.max(0, Math.round(state.health));
-    healthFill.style.width = `${hp}%`;
-    healthFill.style.background = hp > 50 ? '#39d353' : hp > 25 ? '#ffaa00' : '#ff3355';
-    healthText.textContent = `HP ${hp}`;
-    cashEl.textContent = `$${Math.floor(state.cash).toLocaleString('en-US')}`;
-    const wp = WEAPONS[state.weaponIndex];
-    weaponEl.textContent = `${wp.name}  ${state.mag[state.weaponIndex]}/${state.reserve[state.weaponIndex]}${state.reloading > 0 ? '  …reloading' : ''}`;
-    clockEl.textContent = fmtClock(state.timeSec);
-    speedEl.textContent = state.driving
-      ? `${Math.round(Math.abs(state.carSpeed) * 3.6)} km/h`
-      : state.inBoat ? `${Math.round(Math.abs(state.boatSpeed) * 3.6)} km/h` : '';
-    objectiveEl.textContent = missions ? missions.objectiveLabel() : '';
-    if (missions) {
-      const t = missions.timerLeft();
-      objectiveEl.textContent += `   ⏱ ${fmtTimer(t)}`;
-      objectiveEl.style.color = t < 30 ? '#ff8080' : '#ffffff';
-    }
-    crosshair.style.display = !state.driving && !state.inBoat ? 'block' : 'none';
-    const feed = state.messages.slice(-3).join('\n');
-    if (feed !== lastFeed) {
-      feedEl.textContent = feed;
-      lastFeed = feed;
-    }
-    drawMinimap();
-  }
-
-  function showScreen(name, data = {}) {
-    if (name === 'title') {
-      screenEl.innerHTML = `
-        <div class="screen-panel">
-          <h1>SOLMAR CITY</h1>
-          <p class="tagline">An original open-world crime story. Eight jobs. One city. No mercy.</p>
-          <p>Mara has work for you. Steal cars, dodge the law, and take the Big Score.</p>
-          <p class="controls">WASD move · Shift run · Mouse drag camera · Space punch · F shoot · E enter car<br>
-          1/2/3 weapons · R reload · P pause · M mute · Enter start</p>
-          ${data.hasSave ? '<button data-act="continue">Continue</button>' : ''}
-          <button data-act="start">${data.hasSave ? 'New Game' : 'Start Game'}</button>
-          <button data-act="help">How to Play</button>
-          <p class="save-line">${data.hasSave ? `Save found: $${Math.floor(data.save.cash).toLocaleString('en-US')} · ${data.save.jobsDone}/8 jobs · ${data.save.briefcasesFound}/10 briefcases` : 'No save yet — progress is stored in this browser.'}</p>
-        </div>`;
-    } else if (name === 'help') {
-      screenEl.innerHTML = `
-        <div class="screen-panel">
-          <h1>HOW TO PLAY</h1>
-          <p>On foot: WASD to move, Shift to run, drag the mouse to look around. Space punches, F (or click) shoots, E gets into a nearby car or boat.</p>
-          <p>Driving: W/S accelerate and brake, A/D steer, Space is the handbrake, E gets out, C changes the camera.</p>
-          <p>Wanted stars rise when you steal, hit pedestrians, shoot in public or drop a cop. Break line of sight and stay quiet to cool off. At 4 stars the helicopter and roadblocks arrive.</p>
-          <p>Follow Mara's jobs in order — each has a beacon, a minimap marker and a timer. Gold briefcases pay $250 each and stunt ramps pay $600 for a clean landing.</p>
-          <p>Busted or Wasted costs you 10% of your cash.</p>
-          <button data-act="back">Back</button>
-        </div>`;
-    } else if (name === 'pause') {
-      screenEl.innerHTML = `
-        <div class="screen-panel">
-          <h1>PAUSED</h1>
-          <p>Solmar City waits for no one — except right now.</p>
-          <button data-act="resume">Resume</button>
-          <button data-act="quit">Quit to Title</button>
-        </div>`;
-    } else if (name === 'busted') {
-      screenEl.innerHTML = `
-        <div class="screen-panel">
-          <h1>BUSTED</h1>
-          <p>The Solmar PD has you. You wake at the precinct, $${Math.floor(data.loss || 0)} lighter.</p>
-          <button data-act="respawn">Wake Up</button>
-        </div>`;
-    } else if (name === 'wasted') {
-      screenEl.innerHTML = `
-        <div class="screen-panel">
-          <h1>WASTED</h1>
-          <p>Solmar City chewed you up. You wake at the hospital, $${Math.floor(data.loss || 0)} lighter.</p>
-          <button data-act="respawn">Wake Up</button>
-        </div>`;
+    el.cash.textContent = fmtMoney(state.cash);
+    el.healthFill.style.width = `${Math.max(0, state.health)}%`;
+    el.healthFill.style.background = state.health > 50 ? '#3aa655' : state.health > 25 ? '#e0a92e' : '#c23b2e';
+    el.healthNum.textContent = String(Math.round(state.health));
+    const stars = Math.floor(state.wanted);
+    let starHtml = '';
+    for (let i = 0; i < 5; i += 1) starHtml += `<span class="star ${i < stars ? 'lit' : ''}">★</span>`;
+    el.wanted.innerHTML = starHtml;
+    el.wanted.classList.toggle('hot', stars >= 4);
+    el.clock.textContent = fmtClock(state.timeSec);
+    el.weather.textContent = state.rain > 0.4 ? '🌧 Rain' : state.rain > 0.05 ? '🌦 Showers' : '☀ Dry';
+    el.radio.textContent = state.radioOn && state.driving
+      ? `♪ ${RADIO_STATIONS[state.radioStation].name}`
+      : 'Radio off (Q)';
+    if (missions && missions.active && missions.job) {
+      const job = missions.job;
+      const obj = missions.objective;
+      const mins = Math.max(0, Math.floor(missions.timer / 60));
+      const secs = Math.max(0, Math.floor(missions.timer % 60));
+      el.objective.innerHTML = `<b>Job ${job.id}/9 — ${job.name}</b> · ${fmtMoney(job.payout)} · ${mins}:${String(secs).padStart(2, '0')}<br>${obj ? obj.label : ''}${obj && obj.type === 'hold' ? ` — hold ${Math.max(0, Math.ceil((obj.hold || 10) - missions.holdTime))}s` : ''}`;
+      el.objective.classList.remove('hidden');
+    } else if (missions && missions.finishedAll) {
+      el.objective.innerHTML = '<b>Free roam</b> — all nine jobs done. Taxi fares and briefcases still pay.';
+      el.objective.classList.remove('hidden');
     } else {
-      screenEl.innerHTML = '';
+      el.objective.classList.add('hidden');
     }
-    screenEl.style.display = name === 'none' ? 'none' : 'flex';
+    if (state.taxiActive && state.taxiDest) {
+      el.taxi.classList.remove('hidden');
+      el.taxi.innerHTML = `🚕 TAXI — to ${state.taxiDest.name} · fare ${fmtMoney(state.taxiFare)} · ${Math.ceil(state.taxiTimeLeft)}s left`;
+    } else {
+      el.taxi.classList.add('hidden');
+    }
+    if (state.driving && state.car) {
+      el.speed.classList.remove('hidden');
+      const dmg = state.car.health < 55 ? (state.car.health < 25 ? ' 🔥 FIRE!' : ' 💨 smoking') : '';
+      el.speed.textContent = `${Math.round(Math.abs(state.carSpeed) * 3.6)} km/h · ${state.car.type}${dmg}`;
+    } else {
+      el.speed.classList.add('hidden');
+    }
+    if (state.messages.length !== lastMsgCount) {
+      lastMsgCount = state.messages.length;
+      el.messages.innerHTML = state.messages.map((m) => `<div>${m}</div>`).join('');
+    }
+    drawMinimap(missions);
   }
 
-  return { update, showScreen, root };
+  return { showScreen, update, get screen() { return lastScreen; } };
 }
